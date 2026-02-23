@@ -67,3 +67,6 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# service account json because this keeps happening 
+backend/service-account.json
