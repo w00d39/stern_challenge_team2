@@ -34,3 +34,17 @@ async def test_firebase():
 #trying to get data from firestore
     docs = db.collection("test").limit(1).stream()
     return {"status": "firebase connected!!"}
+
+
+@app.get("/test-openrouter")
+async def test_openrouter():
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.getenv("OPENROUTER_API_KEY")
+    )
+    response = client.chat.completions.create(
+        model="liquid/lfm-2.5-1.2b-thinking:free",
+        messages=[{"role": "user", "content": "Say hello in one word"}]
+    )
+    return {"response": response.choices[0].message.content}
