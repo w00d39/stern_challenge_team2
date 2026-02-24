@@ -48,3 +48,25 @@ async def test_openrouter():
         messages=[{"role": "user", "content": "Say hello in one word"}]
     )
     return {"response": response.choices[0].message.content}
+
+from graph import app_graph
+
+@app.post("/test-graph")
+async def test_graph(facility_id: str = "FAC-001"):
+    config = {"configurable": {"thread_id": facility_id}}
+    result = app_graph.invoke({
+        "facility_id": facility_id,
+        "facility_profile": {
+        "annual_diesel_runtime_hours": 100,
+        "monthly_demand_charge_usd": 8000,
+        "facility_power_load_kw": 500
+    },
+        "energy_load_output": None,
+        "battery_sizing_output": None,
+        "human_feedback": None,
+        "final_proposal": None,
+        "status": "starting",
+        "disqualified": False,
+        "disqualifier_reason": None
+    }, config)
+    return {"status": result["status"], "disqualified": result["disqualified"]}
