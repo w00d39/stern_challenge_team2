@@ -1,8 +1,8 @@
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from checkpointer import FirestoreCheckpointer
 from typing import TypedDict, Optional
 
-# ── State ──────────────────────────────────────────────────────────────────
+
 class AgentState(TypedDict):
     facility_id: str
     facility_profile: Optional[dict]
@@ -14,7 +14,7 @@ class AgentState(TypedDict):
     disqualified: bool
     disqualifier_reason: Optional[str]
 
-# ── Nodes ──────────────────────────────────────────────────────────────────
+
 def orchestrator(state: AgentState) -> AgentState:
     print(f"Orchestrator running for {state['facility_id']}")
     
@@ -46,13 +46,13 @@ def hitl_node(state: AgentState) -> AgentState:
     print("HITL interrupt firing...")
     return {**state, "status": "pending_review"}
 
-# ── Routing ────────────────────────────────────────────────────────────────
+
 def route_after_orchestrator(state: AgentState) -> str:
     if state["disqualified"]:
         return "end"
     return "energy_load_agent"
 
-# ── Build Graph ────────────────────────────────────────────────────────────
+
 def build_graph():
     graph = StateGraph(AgentState)
     
@@ -72,7 +72,7 @@ def build_graph():
     graph.add_edge("battery_sizing_agent", "hitl_node")
     graph.add_edge("hitl_node", END)
     
-    checkpointer = MemorySaver()
+    checkpointer =FirestoreCheckpointer()
     return graph.compile(checkpointer=checkpointer, interrupt_before=["hitl_node"])
 
 app_graph = build_graph()

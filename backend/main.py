@@ -57,7 +57,7 @@ async def test_graph(facility_id: str = "FAC-001"):
     result = app_graph.invoke({
         "facility_id": facility_id,
         "facility_profile": {
-        "annual_diesel_runtime_hours": 100,
+        "annual_diesel_runtime_hours": 5800,
         "monthly_demand_charge_usd": 8000,
         "facility_power_load_kw": 500
     },
