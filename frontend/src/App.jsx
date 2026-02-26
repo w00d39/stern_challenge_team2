@@ -1,26 +1,36 @@
 import { useEffect, useState } from 'react'
-import { db } from './lib/firebase'
-import { collection, getDocs } from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
+import { auth } from './lib/firebase'
+import Login from './pages/login'
 
 function App() {
-  const [status, setStatus] = useState('connecting...')
+  const [user, setUser] = useState(null)
+  const [role, setRole] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const test = async () => {
-      try {
-        await getDocs(collection(db, 'test'))
-        setStatus('Firebase connected!')
-      } catch (err) {
-        setStatus('Error: ' + err.message)
+    return onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        const token = await u.getIdTokenResult()
+        setRole(token.claims.role)
+        setUser(u)
+      } else {
+        setUser(null)
+        setRole(null)
       }
-    }
-    test()
+      setLoading(false)
+    })
   }, [])
 
+  if (loading) return <div>Loading...</div>
+  if (!user) return <Login />
+
   return (
-    <div>
-      <h1>Accelera Battery System</h1>
-      <p>{status}</p>
+    <div style={{ padding: 24 }}>
+      <h2>Accelera Battery System</h2>
+      <p>Logged in as: {user.email}</p>
+      <p>Role: {role}</p>
+      <button onClick={() => auth.signOut()}>Sign Out</button>
     </div>
   )
 }
