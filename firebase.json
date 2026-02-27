@@ -6,7 +6,7 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "public": "w00d39/stern_challenge_team2",
+    "public": "frontend/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
