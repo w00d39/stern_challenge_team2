@@ -1,19 +1,18 @@
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, Dict, Any
 
 from firestore_tools import (
-    facility_get,
-    case_create,
-    case_update,
-    hitl_create,
-    audit_append,
+    facility_profile_get,
+    proposal_create,
+    proposal_update,
+    proposal_save_draft,
+    agent_decision_append,
 )
 
 
 class AgentState(TypedDict):
     facility_id: str
-    case_id: Optional[str]
-    hitl_ticket_id: Optional[str]
+    run_id: Optional[str]
 
     facility_profile: Optional[dict]
     energy_load_output: Optional[dict]
@@ -30,41 +29,45 @@ def orchestrator(state: AgentState) -> AgentState:
     facility_id = state["facility_id"]
     print(f"Orchestrator running for {facility_id}")
 
-    # Load facility profile from Firestore
-    profile = facility_get(facility_id) or {}
+    profile = facility_profile_get(facility_id) or {}
 
-    # Ensure case exists
-    case_id = state.get("case_id")
-    if not case_id:
-        case_id = case_create(facility_id)
+    run_id = state.get("run_id")
+    if not run_id:
+        run_id = proposal_create(facility_id)
 
-    # Save progress to Firestore
-    case_update(case_id, {"status": "running"})
+    proposal_update(run_id, {"status": "running"})
 
-    audit_append(
-        case_id,
-        "orchestrator",
-        "init",
-        f"facility_id={facility_id}",
-        f"facility_found={bool(profile)}",
-        "Loaded facility_profile and ensured case record exists.",
+    agent_decision_append(
+        run_id=run_id,
+        facility_id=facility_id,
+        agent_name="orchestrator",
+        input_summary=f"facility_id={facility_id}",
+        output_json={"facility_found": bool(profile)},
+        confidence="high",
+        rationale="Loaded facility_profile and ensured proposal record exists.",
     )
 
-    # Hard disqualifiers
     if profile.get("annual_diesel_runtime_hours", 0) < 200:
         reason = "Emergency-Only — Low Priority"
-        case_update(case_id, {"status": "disqualified", "disqualifier_reason": reason})
-        audit_append(
-            case_id,
-            "orchestrator",
-            "disqualify",
-            "annual_diesel_runtime_hours<200",
-            reason,
-            "Below minimum diesel runtime threshold.",
+        proposal_update(
+            run_id,
+            {
+                "status": "rejected",
+                "feedback_text": reason,
+            },
+        )
+        agent_decision_append(
+            run_id=run_id,
+            facility_id=facility_id,
+            agent_name="orchestrator",
+            input_summary="annual_diesel_runtime_hours<200",
+            output_json={"disqualified": True, "reason": reason},
+            confidence="high",
+            rationale="Below minimum diesel runtime threshold.",
         )
         return {
             **state,
-            "case_id": case_id,
+            "run_id": run_id,
             "facility_profile": profile,
             "disqualified": True,
             "disqualifier_reason": reason,
@@ -73,18 +76,25 @@ def orchestrator(state: AgentState) -> AgentState:
 
     if profile.get("monthly_demand_charge_usd", 0) < 2000:
         reason = "Low Demand Charge — Monitor"
-        case_update(case_id, {"status": "disqualified", "disqualifier_reason": reason})
-        audit_append(
-            case_id,
-            "orchestrator",
-            "disqualify",
-            "monthly_demand_charge_usd<2000",
-            reason,
-            "Below minimum demand charge threshold.",
+        proposal_update(
+            run_id,
+            {
+                "status": "rejected",
+                "feedback_text": reason,
+            },
+        )
+        agent_decision_append(
+            run_id=run_id,
+            facility_id=facility_id,
+            agent_name="orchestrator",
+            input_summary="monthly_demand_charge_usd<2000",
+            output_json={"disqualified": True, "reason": reason},
+            confidence="high",
+            rationale="Below minimum demand charge threshold.",
         )
         return {
             **state,
-            "case_id": case_id,
+            "run_id": run_id,
             "facility_profile": profile,
             "disqualified": True,
             "disqualifier_reason": reason,
@@ -93,39 +103,46 @@ def orchestrator(state: AgentState) -> AgentState:
 
     if profile.get("facility_power_load_kw", 0) < 100:
         reason = "Below Minimum Scale"
-        case_update(case_id, {"status": "disqualified", "disqualifier_reason": reason})
-        audit_append(
-            case_id,
-            "orchestrator",
-            "disqualify",
-            "facility_power_load_kw<100",
-            reason,
-            "Below minimum facility load threshold.",
+        proposal_update(
+            run_id,
+            {
+                "status": "rejected",
+                "feedback_text": reason,
+            },
+        )
+        agent_decision_append(
+            run_id=run_id,
+            facility_id=facility_id,
+            agent_name="orchestrator",
+            input_summary="facility_power_load_kw<100",
+            output_json={"disqualified": True, "reason": reason},
+            confidence="high",
+            rationale="Below minimum facility load threshold.",
         )
         return {
             **state,
-            "case_id": case_id,
+            "run_id": run_id,
             "facility_profile": profile,
             "disqualified": True,
             "disqualifier_reason": reason,
             "status": "disqualified",
         }
 
-    # Qualified: continue
-    case_update(case_id, {"status": "routing"})
-    audit_append(
-        case_id,
-        "orchestrator",
-        "route",
-        "passed hard disqualifiers",
-        "next=energy_load_agent",
-        "Meets minimum thresholds; proceed to analysis.",
+    proposal_update(run_id, {"status": "routing"})
+    agent_decision_append(
+        run_id=run_id,
+        facility_id=facility_id,
+        agent_name="orchestrator",
+        input_summary="passed hard disqualifiers",
+        output_json={"next": "energy_load_agent"},
+        confidence="high",
+        rationale="Meets minimum thresholds; proceed to analysis.",
     )
 
     return {
         **state,
-        "case_id": case_id,
-        "facility_profile": profile,  # important: keep in state for HITL context
+        "run_id": run_id,
+        "facility_profile": profile,
         "disqualified": False,
         "status": "routing",
     }
@@ -133,57 +150,89 @@ def orchestrator(state: AgentState) -> AgentState:
 
 def energy_load_agent(state: AgentState) -> AgentState:
     print("Energy Load Agent running...")
-    # Placeholder
+
+    output = {"status": "complete"}
+
+    agent_decision_append(
+        run_id=state["run_id"],
+        facility_id=state["facility_id"],
+        agent_name="energy_load_agent",
+        input_summary="Generated placeholder energy load analysis output.",
+        output_json=output,
+        confidence="medium",
+        rationale="Current implementation is a placeholder agent.",
+    )
+
     return {
         **state,
-        "energy_load_output": {"status": "complete"},
+        "energy_load_output": output,
         "status": "energy_load_done",
     }
 
 
 def battery_sizing_agent(state: AgentState) -> AgentState:
     print("Battery Sizing Agent running...")
-    # Placeholder
+
+    output = {"status": "complete"}
+
+    agent_decision_append(
+        run_id=state["run_id"],
+        facility_id=state["facility_id"],
+        agent_name="battery_sizing_agent",
+        input_summary="Generated placeholder battery sizing output.",
+        output_json=output,
+        confidence="medium",
+        rationale="Current implementation is a placeholder agent.",
+    )
+
     return {
         **state,
-        "battery_sizing_output": {"status": "complete"},
+        "battery_sizing_output": output,
         "status": "battery_sizing_done",
     }
 
 
-def hitl_node(state: AgentState) -> AgentState:
-    print("HITL node creating ticket...")
+def build_final_proposal(state: AgentState) -> Dict[str, Any]:
+    return {
+        "facility_id": state["facility_id"],
+        "facility_profile": state.get("facility_profile"),
+        "energy_load_output": state.get("energy_load_output"),
+        "battery_sizing_output": state.get("battery_sizing_output"),
+        "recommendation_status": "draft_ready",
+    }
 
-    case_id = state.get("case_id")
-    if not case_id:
-        case_id = case_create(state["facility_id"])
 
-    ticket_id = hitl_create(
-        case_id=case_id,
-        question="Approve assumptions and proceed?",
-        context={
-            "facility_id": state["facility_id"],
-            "facility_profile": state.get("facility_profile"),
-            "energy_load_output": state.get("energy_load_output"),
-            "battery_sizing_output": state.get("battery_sizing_output"),
-        },
-        options=["approve", "revise", "reject"],
+def review_node(state: AgentState) -> AgentState:
+    print("Review node saving draft proposal...")
+
+    final_proposal = build_final_proposal(state)
+
+    urgency_score = None
+    profile = state.get("facility_profile") or {}
+    demand_charge = profile.get("monthly_demand_charge_usd")
+    if demand_charge is not None:
+        urgency_score = float(demand_charge)
+
+    proposal_save_draft(
+        run_id=state["run_id"],
+        facility_id=state["facility_id"],
+        proposal_json=final_proposal,
+        urgency_score=urgency_score,
     )
 
-    case_update(case_id, {"status": "paused_for_review"})
-    audit_append(
-        case_id,
-        "hitl_node",
-        "hitl_created",
-        "create review ticket",
-        f"ticket_id={ticket_id}",
-        "Human approval required before finalizing recommendation.",
+    agent_decision_append(
+        run_id=state["run_id"],
+        facility_id=state["facility_id"],
+        agent_name="review_node",
+        input_summary="Synthesized agent outputs into draft proposal.",
+        output_json={"status": "pending_review"},
+        confidence="medium",
+        rationale="Draft proposal saved and routed for human review.",
     )
 
     return {
         **state,
-        "case_id": case_id,
-        "hitl_ticket_id": ticket_id,
+        "final_proposal": final_proposal,
         "status": "pending_review",
     }
 
@@ -198,7 +247,7 @@ def build_graph():
     graph.add_node("orchestrator", orchestrator)
     graph.add_node("energy_load_agent", energy_load_agent)
     graph.add_node("battery_sizing_agent", battery_sizing_agent)
-    graph.add_node("hitl_node", hitl_node)
+    graph.add_node("review_node", review_node)
 
     graph.set_entry_point("orchestrator")
 
@@ -212,8 +261,8 @@ def build_graph():
     )
 
     graph.add_edge("energy_load_agent", "battery_sizing_agent")
-    graph.add_edge("battery_sizing_agent", "hitl_node")
-    graph.add_edge("hitl_node", END)
+    graph.add_edge("battery_sizing_agent", "review_node")
+    graph.add_edge("review_node", END)
 
     return graph.compile()
 

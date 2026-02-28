@@ -5,6 +5,7 @@ if __name__ == "__main__":
 
     init_state = {
         "facility_id": facility_id,
+        "run_id": None,
         "facility_profile": None,
         "energy_load_output": None,
         "battery_sizing_output": None,

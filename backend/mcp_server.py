@@ -3,15 +3,15 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 
 from firestore_tools import (
-    facility_get,
-    facility_upsert,
-    case_create,
-    case_get,
-    case_update,
-    hitl_create,
-    hitl_list_open,
-    hitl_resolve,
-    audit_append,
+    facility_profile_get,
+    facility_profile_upsert,
+    proposal_create,
+    proposal_get,
+    proposal_save_draft,
+    proposal_update,
+    proposal_update_decision,
+    proposal_list_pending,
+    agent_decision_append,
 )
 
 mcp = FastMCP("stern-firestore-mcp")
@@ -23,63 +23,82 @@ def ping_tool() -> Dict[str, bool]:
 
 
 @mcp.tool()
-def facility_get_tool(facility_id: str) -> Optional[Dict[str, Any]]:
-    return facility_get(facility_id)
+def get_facility_profile(facility_id: str) -> Optional[Dict[str, Any]]:
+    return facility_profile_get(facility_id)
 
 
 @mcp.tool()
-def facility_upsert_tool(facility_id: str, patch: Dict[str, Any]) -> Dict[str, bool]:
-    facility_upsert(facility_id, patch)
+def upsert_facility_profile(facility_id: str, patch: Dict[str, Any]) -> Dict[str, bool]:
+    facility_profile_upsert(facility_id, patch)
     return {"ok": True}
 
 
 @mcp.tool()
-def case_create_tool(facility_id: str) -> Dict[str, str]:
-    return {"case_id": case_create(facility_id)}
+def create_proposal(facility_id: str) -> Dict[str, str]:
+    run_id = proposal_create(facility_id)
+    return {"run_id": run_id}
 
 
 @mcp.tool()
-def case_get_tool(case_id: str) -> Optional[Dict[str, Any]]:
-    return case_get(case_id)
+def get_proposal(run_id: str) -> Optional[Dict[str, Any]]:
+    return proposal_get(run_id)
 
 
 @mcp.tool()
-def case_update_tool(case_id: str, patch: Dict[str, Any]) -> Dict[str, bool]:
-    case_update(case_id, patch)
+def save_draft_proposal(
+    run_id: str,
+    facility_id: str,
+    proposal_json: Dict[str, Any],
+    urgency_score: Optional[float] = None,
+) -> Dict[str, bool]:
+    proposal_save_draft(run_id, facility_id, proposal_json, urgency_score)
     return {"ok": True}
 
 
 @mcp.tool()
-def hitl_create_tool(
-    case_id: str,
-    question: str,
-    context: Dict[str, Any],
-    options: List[str],
-) -> Dict[str, str]:
-    return {"ticket_id": hitl_create(case_id, question, context, options)}
-
-
-@mcp.tool()
-def hitl_list_open_tool(case_id: str) -> List[Dict[str, Any]]:
-    return hitl_list_open(case_id)
-
-
-@mcp.tool()
-def hitl_resolve_tool(ticket_id: str, decision: str, notes: str, reviewer: str) -> Dict[str, bool]:
-    hitl_resolve(ticket_id, decision, notes, reviewer)
+def update_proposal(
+    run_id: str,
+    patch: Dict[str, Any],
+) -> Dict[str, bool]:
+    proposal_update(run_id, patch)
     return {"ok": True}
 
 
 @mcp.tool()
-def audit_append_tool(
-    case_id: str,
-    agent: str,
-    action: str,
-    inputs_summary: str,
-    output_summary: str,
+def update_proposal_status(
+    run_id: str,
+    status: str,
+    reviewer_uid: str,
+    feedback_text: Optional[str] = None,
+) -> Dict[str, bool]:
+    proposal_update_decision(run_id, status, reviewer_uid, feedback_text)
+    return {"ok": True}
+
+
+@mcp.tool()
+def get_pending_proposals() -> List[Dict[str, Any]]:
+    return proposal_list_pending()
+
+
+@mcp.tool()
+def save_agent_decision(
+    run_id: str,
+    facility_id: str,
+    agent_name: str,
+    input_summary: str,
+    output_json: Dict[str, Any],
+    confidence: str,
     rationale: str,
 ) -> Dict[str, bool]:
-    audit_append(case_id, agent, action, inputs_summary, output_summary, rationale)
+    agent_decision_append(
+        run_id=run_id,
+        facility_id=facility_id,
+        agent_name=agent_name,
+        input_summary=input_summary,
+        output_json=output_json,
+        confidence=confidence,
+        rationale=rationale,
+    )
     return {"ok": True}
 
 
