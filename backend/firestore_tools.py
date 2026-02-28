@@ -22,7 +22,6 @@ def init_db():
     if _db is not None:
         return _db
 
-    # Reuse already-initialized default app (e.g. main.py)
     if firebase_admin._apps:
         _app = firebase_admin.get_app()
     else:
@@ -34,31 +33,9 @@ def init_db():
     return _db
 
 
-def audit_append(
-    case_id: str,
-    agent: str,
-    action: str,
-    inputs_summary: str,
-    output_summary: str,
-    rationale: str,
-) -> None:
+def facility_profile_get(facility_id: str) -> Optional[Dict[str, Any]]:
     db = init_db()
-    db.collection("audit_logs").add(
-        {
-            "case_id": case_id,
-            "ts": now_ts(),
-            "agent": agent,
-            "action": action,
-            "inputs_summary": inputs_summary,
-            "output_summary": output_summary,
-            "rationale": rationale,
-        }
-    )
-
-
-def facility_get(facility_id: str) -> Optional[Dict[str, Any]]:
-    db = init_db()
-    snap = db.collection("facilities").document(facility_id).get()
+    snap = db.collection("facility_profiles").document(facility_id).get()
     if not snap.exists:
         return None
     out = snap.to_dict()
@@ -66,92 +43,133 @@ def facility_get(facility_id: str) -> Optional[Dict[str, Any]]:
     return out
 
 
-def facility_upsert(facility_id: str, patch: Dict[str, Any]) -> None:
+def facility_profile_upsert(facility_id: str, patch: Dict[str, Any]) -> None:
     db = init_db()
     patch = dict(patch)
     patch["updated_at"] = now_ts()
-    db.collection("facilities").document(facility_id).set(patch, merge=True)
+    db.collection("facility_profiles").document(facility_id).set(patch, merge=True)
 
 
-def case_create(facility_id: str) -> str:
+def proposal_create(facility_id: str) -> str:
     db = init_db()
-    ref = db.collection("cases").document()
+    ref = db.collection("proposals").document()
+    run_id = ref.id
     ref.set(
         {
+            "run_id": run_id,
             "facility_id": facility_id,
             "status": "created",
+            "proposal_json": None,
+            "urgency_score": None,
+            "revision_count": 0,
+            "reviewer_uid": None,
+            "feedback_text": None,
             "created_at": now_ts(),
+            "reviewed_at": None,
             "updated_at": now_ts(),
         }
     )
-    return ref.id
+    return run_id
 
 
-def case_get(case_id: str) -> Optional[Dict[str, Any]]:
+def proposal_get(run_id: str) -> Optional[Dict[str, Any]]:
     db = init_db()
-    snap = db.collection("cases").document(case_id).get()
+    snap = db.collection("proposals").document(run_id).get()
     if not snap.exists:
         return None
     out = snap.to_dict()
-    out["case_id"] = case_id
+    out["run_id"] = run_id
     return out
 
 
-def case_update(case_id: str, patch: Dict[str, Any]) -> None:
+def proposal_update(run_id: str, patch: Dict[str, Any]) -> None:
     db = init_db()
     patch = dict(patch)
     patch["updated_at"] = now_ts()
-    db.collection("cases").document(case_id).set(patch, merge=True)
+    db.collection("proposals").document(run_id).set(patch, merge=True)
 
 
-def hitl_create(
-    case_id: str,
-    question: str,
-    context: Dict[str, Any],
-    options: List[str],
-) -> str:
+def proposal_save_draft(
+    run_id: str,
+    facility_id: str,
+    proposal_json: Dict[str, Any],
+    urgency_score: Optional[float] = None,
+) -> None:
     db = init_db()
-    ref = db.collection("hitl_tickets").document()
-    ref.set(
+    db.collection("proposals").document(run_id).set(
         {
-            "case_id": case_id,
-            "status": "open",
-            "question": question,
-            "context": context,
-            "options": options,
-            "created_at": now_ts(),
-        }
+            "run_id": run_id,
+            "facility_id": facility_id,
+            "proposal_json": proposal_json,
+            "urgency_score": urgency_score,
+            "status": "pending_review",
+            "updated_at": now_ts(),
+        },
+        merge=True,
     )
-    return ref.id
 
 
-def hitl_list_open(case_id: str) -> List[Dict[str, Any]]:
+def proposal_update_decision(
+    run_id: str,
+    status: str,
+    reviewer_uid: str,
+    feedback_text: Optional[str] = None,
+) -> None:
+    db = init_db()
+    patch: Dict[str, Any] = {
+        "status": status,
+        "reviewer_uid": reviewer_uid,
+        "feedback_text": feedback_text,
+        "reviewed_at": now_ts(),
+        "updated_at": now_ts(),
+    }
+
+    if status == "revision_requested":
+        snap = db.collection("proposals").document(run_id).get()
+        revision_count = 0
+        if snap.exists:
+            data = snap.to_dict() or {}
+            revision_count = int(data.get("revision_count", 0))
+        patch["revision_count"] = revision_count + 1
+
+    db.collection("proposals").document(run_id).set(patch, merge=True)
+
+
+def proposal_list_pending() -> List[Dict[str, Any]]:
     db = init_db()
     q = (
-        db.collection("hitl_tickets")
-        .where(filter=FieldFilter("case_id", "==", case_id))
-        .where(filter=FieldFilter("status", "==", "open"))
+        db.collection("proposals")
+        .where(filter=FieldFilter("status", "==", "pending_review"))
+        .order_by("urgency_score", direction=firestore.Query.DESCENDING)
     )
 
     out: List[Dict[str, Any]] = []
     for doc in q.stream():
         d = doc.to_dict()
-        d["ticket_id"] = doc.id
+        d["run_id"] = doc.id
         out.append(d)
     return out
 
 
-def hitl_resolve(ticket_id: str, decision: str, notes: str, reviewer: str) -> None:
+def agent_decision_append(
+    run_id: str,
+    facility_id: str,
+    agent_name: str,
+    input_summary: str,
+    output_json: Dict[str, Any],
+    confidence: str,
+    rationale: str,
+) -> None:
     db = init_db()
-    db.collection("hitl_tickets").document(ticket_id).set(
+    db.collection("agent_decisions").add(
         {
-            "status": "resolved",
-            "resolved_at": now_ts(),
-            "resolution": {
-                "decision": decision,
-                "notes": notes,
-                "reviewer": reviewer,
-            },
-        },
-        merge=True,
+            "run_id": run_id,
+            "facility_id": facility_id,
+            "agent_name": agent_name,
+            "input_summary": input_summary,
+            "output_json": output_json,
+            "confidence": confidence,
+            "rationale": rationale,
+            "timestamp": now_ts(),
+        }
     )
