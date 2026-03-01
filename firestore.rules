@@ -2,17 +2,48 @@ rules_version='2'
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 3, 24);
+    
+    
+    function isSignedIn() {
+      return request.auth != null;
     }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function isFacilityEngineer() {
+      return isSignedIn() && role() == 'facility_engineer';
+    }
+
+    function isDirector() {
+      return isSignedIn() && role() == 'sustainability_director';
+    }
+
+    function isAuditor() {
+      return isSignedIn() && role() == 'auditor';
+    }
+
+    match /proposals/{runID} {
+      allow read: if isDirector() || isAuditor()
+          || (isFacilityEngineer() && resource.data.facility_id == request.auth.uid);
+      allow update: if isDirector()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status','reviewer_uid', 'feedback_text', 
+                    'reviewed_at', 'revision_count']);
+        && request.resource.data.status in 
+            ['pending_review', 'revision_requested', 'approved', 'rejected'];
+    }
+
+    match /agent_decisions/{decisionId} {
+      allow read: if isDirector() || isAuditor();
+      allow write: if false;
+    }
+
+    match /checkpoints/{checkpointId} {
+      allow read, write: if false;
+    }
+
+
   }
 }
