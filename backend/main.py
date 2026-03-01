@@ -1,9 +1,11 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, auth
+from firestore_tools import proposal_update_decision
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 load_dotenv(dotenv_path=".env")
 
@@ -28,6 +30,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class ProposalDecisionRequest(BaseModel):
+    status: str
+    reviewer_uid: str
+    feedback_text: str | None = None
 
 @app.get("/ping")
 async def ping():
@@ -68,8 +74,7 @@ async def test_graph(facility_id: str = "demo_facility"):
     result = app_graph.invoke(
         {
             "facility_id": facility_id,
-            "case_id": None,
-            "hitl_ticket_id": None,
+            "run_id": None,
             "facility_profile": None,
             "energy_load_output": None,
             "battery_sizing_output": None,
@@ -98,3 +103,13 @@ async def setup_roles():
         auth.set_custom_user_claims(user.uid, {"role": u["role"]})
 
     return {"status": "roles set"}
+
+@app.post("/proposals/{run_id}/decision")
+async def decide_proposal(run_id: str, body: ProposalDecisionRequest):
+    proposal_update_decision(
+        run_id=run_id,
+        status=body.status,
+        reviewer_uid=body.reviewer_uid,
+        feedback_text=body.feedback_text,
+    )
+    return {"ok": True, "run_id": run_id, "status": body.status}
