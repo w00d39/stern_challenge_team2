@@ -86,4 +86,5 @@ node_modules/
 .dataconnect
 
 # service account json because this keeps happening 
-backend/service-account.json
+backend/service-account.json.DS_Store
+ **/.DS_Store
