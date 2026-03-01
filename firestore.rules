@@ -30,7 +30,7 @@ service cloud.firestore {
       allow update: if isDirector()
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['status','reviewer_uid', 'feedback_text', 
-                    'reviewed_at', 'revision_count']);
+                    'reviewed_at', 'revision_count'])
         && request.resource.data.status in 
             ['pending_review', 'revision_requested', 'approved', 'rejected'];
     }
