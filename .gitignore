@@ -16,7 +16,24 @@ firebase-debug.*.log*
 # For a team working on the same Firebase project(s), it is recommended to leave
 # it commented so all members can deploy to the same project(s) in .firebaserc.
 # .firebaserc
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+*.env
+.env
 
+# Firebase credentials
+*service-account*.json
+*firebase-credentials*.json
+FIREBASE_CREDENTIALS
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Mac
+.DS_Store
 # Runtime data
 pids
 *.pid
@@ -67,3 +84,6 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# service account json because this keeps happening 
+backend/service-account.json
