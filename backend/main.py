@@ -30,9 +30,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def verify_bearer_token(authorization: str | None):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    token = authorization.split(" ", 1)[1].strip()
+
+    try:
+        decoded = auth.verify_id_token(token)
+        return decoded
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 class ProposalDecisionRequest(BaseModel):
     status: str
-    reviewer_uid: str
     feedback_text: str | None = None
 
 @app.get("/ping")
@@ -105,11 +119,26 @@ async def setup_roles():
     return {"status": "roles set"}
 
 @app.post("/proposals/{run_id}/decision")
-async def decide_proposal(run_id: str, body: ProposalDecisionRequest):
+async def decide_proposal(
+    run_id: str,
+    body: ProposalDecisionRequest,
+    authorization: str | None = Header(default=None),
+):
+    decoded = verify_bearer_token(authorization)
+    role = decoded.get("role")
+    if role != "sustainability_director":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    reviewer_uid = decoded.get("uid")
+    if not reviewer_uid:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    allowed_statuses = {"approved", "rejected", "revision_requested"}
+    if body.status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail="Invalid status")
     proposal_update_decision(
         run_id=run_id,
         status=body.status,
-        reviewer_uid=body.reviewer_uid,
+        reviewer_uid=reviewer_uid,
         feedback_text=body.feedback_text,
     )
     return {"ok": True, "run_id": run_id, "status": body.status}
