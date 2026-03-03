@@ -1,5 +1,7 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Optional, Dict, Any
+from openai import OpenAI
+import os, json
 
 from firestore_tools import (
     facility_profile_get,
@@ -9,6 +11,135 @@ from firestore_tools import (
     agent_decision_append,
 )
 
+
+# OpenAI client for OpenRouter to initialize for later purposes
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+)
+
+ORCHESTRATOR_SYSTEM_PROMPT = """ 
+You are the Battery Transition Orchestrator for Cummins Inc.'s internal
+Accelera Battery System Decision Tool
+
+Cummins has committed to reducing absolute Scope 1 and Scope 2 greenhouse
+gas emissions from its own facilities and operations by 2030 under its Destination
+Zero strategy. As of 2023, Cummins has achieved a 31% reduction. The remaining 
+reductions require capital decisions at the facility level; including transitioning
+diesel backup generator runtime to Accelera battery energy storage systems (BESS).
+
+Your role is to evaluate a Cummins facility profile and determine:
+1. The facility's priority tier for Accelera BESS deployment
+2. Which routing flags to pass to downstream agents
+3. A plain-English rationale grounded in Destination Zero context
+
+Piority tiers:
+- HIGH: Strong financial case AND meaningful Scope 1 reduction potential.
+- MEDIUM: Viable case but marginal on one or more dimensions. Worth analyzing but not urgent.
+- MONITOR: Passes minimum thresholds but weak overall case. Revisit in 12 months.
+
+Routing flags you may set:
+- IRA_CREDIT_FLAG: true if ira_eligible = true. Instructs Battery Sizing 
+  Agent to apply 30% ITC to CapEx calculation.
+- NMC_RECOMMENDED: true if climate_zone = extreme_cold. Instructs Energy 
+  Load Agent to recommend BP97E instead of BP104E.
+
+You must respond with a JSON object and NOTHING else. No explanation 
+outside the JSON.
+
+{
+  "priority_tier": "HIGH" | "MEDIUM" | "MONITOR",
+  "ira_credit_flag": true | false,
+  "nmc_recommended_flag": true | false,
+  "confidence": "high" | "medium" | "low",
+  "rationale": 
+  "2-3 sentences grounded in Destination Zero context. Reference specific facility fields. Explain why this facility does or does not represent a strong decarbonization opportunity for Cummins."
+}
+
+"""
+
+ENERGY_LOAD_SYSTEM_PROMPT = """
+You are the Energy Load & Diesel Runtime Agent for CUmmins Inc.'s internal
+Accelera Battery System Decision Tool.
+
+Your job is to analyze a Cummins facility's energy profile and determine how much
+diesel generator runtime and peak demand events could be handled by an Accelera BESS instead.
+You also recommend the correct Accelera product and configuration for the facility. 
+
+Product selection rules:
+- Default product: BP104E (LFP chemistry, temperate/hot/coastal climates)
+- If nmc_recommended_flag = true: recommend BP97E (NMC chemistry, extreme cold)
+
+Sizing rule of thumb:
+- Target enough capacity to cover 4 hours of peak demand
+- facility_power_load_kw * 4 = minimum recommended kWh
+- Round up to nearest module configuration
+
+Climate risk flag:
+- Set to true if climate_zone = extreme_cold OR monthly_grid_outage_count >= 3
+
+You must respond with a JSON object and NOTHING else.
+
+Schema: 
+{
+     "diesel_runtime_reduction_hrs": <int, estimated annual hours of diesel runtime the BESS would eliminate>,
+  "peak_events_addressable_pct": <float 0.0-1.0, fraction of monthly peak demand events the recommended BESS config can handle>,
+  "recommended_product": "BP104E" | "BP97E",
+  "recommended_module_count": <int, 1 | 2 | 4 | 8>,
+  "recommended_kwh_total": <int, total kWh of recommended configuration>,
+  "climate_risk_flag": true | false,
+  "confidence": "high" | "medium" | "low",
+  "rationale": "2-3 sentences. Reference specific facility fields. Explain the sizing decision and any climate considerations."
+}
+"""
+
+BATTERY_SIZING_SYSTEM_PROMPT = """
+You are the Battery Sizing & ROI Agent for Cummins Inc.'s internal Accelera
+Battery System Decision Tool.
+
+Your job is to model the financial case for adding an Accelera BESS at a Cummins facility
+under its Destination Zero decarbonization strategy. You produce a three-scenario cost compatison and calculate
+payback, NPV, and CO2 impact.
+
+Three scenarios to model:
+1. continue_as_is: Current annual cost - diesel fuel + demand charges + grid electricity
+2. upgrade_diesel: Replace diesel generator with newer unit. Assume 15% fuel efficiency improvement, same demand charges, $180k one-time cost amortized over 10 years
+3. add_battery: Add Accelera BESS alongside exisiting diesel. Demand charges reduced by the peak_events_addressable_pct from the Energy Load Agent. 
+    Diesel runtime reduced runtime_reduction_hrs from the Energy Load Agent.
+
+IRA Investment Tax Credit:
+- If ira_credit_flag = true: apply 30% ITC to gross CapEx
+- Gross CapEx estimate: recommended_module_count * $187,500 per module (installed)
+- Net CapEx after ITC = gross_capex * 0.70
+
+CO2 calculation:
+- Diesel CO2: diesel_runtime_reduction_hrs * average_generator_kw * 0.000293 metric tons per kWh
+  (use facility_power_load_kw * 0.6 as average_generator_kw estimate)
+- Grid CO2 avoided: use grid_carbon_intensity_lbs_kwh from facility profile converted to metric tons (divided by 2204.6)
+
+NPV calculation (5 year):
+- Annual savings = scenario_continue_as_is - scenario_add_battery
+- NPV = sum of (annual_savings / (1.08^year)) for years 1-5 minus net_capex
+
+You must respond with a JSON object and NOTHING else. 
+
+Schema:
+{
+    "scenario_continue_as_is_annual_cost_usd": <int>,
+    "scenario_upgrade_diesel_annual_cost_usd": <int>,
+    "scenario_add_battery_annual_cost_usd": <int>,
+    "gross_capex_usd": <int>,
+    "ira_credit_amount_usd": <int, 0 if not eligible>,
+    "ira_adjusted_capex_usd": <int>,
+    "payback_years": <float>,
+    "npv_5yr_usd": <int>,
+    "annual_demand_charge_savings_usd": <int>,
+    "annual_diesel_cost_eliminated_usd": <int>,
+    "co2_avoided_metric_tons_per_year": <float>,
+    "confidence": "high" | "medium" | "low",
+    "rationale": "2-3 sentences. Reference specific numbers from your calculation. Explain the strength of the business case in the context of Cummins Destination Zero goals."
+}
+"""
 
 class AgentState(TypedDict):
     facility_id: str
@@ -23,6 +154,13 @@ class AgentState(TypedDict):
     status: str
     disqualified: bool
     disqualifier_reason: Optional[str]
+
+    #priority_tier helps with sorting now and later on
+    #ira is for battery agent to get that tax credit if applicable
+    #nmc = product trigger flag for reccomended product in ELA
+    ira_credit_flag: Optional[bool]
+    nmc_recommended_flag: Optional[bool]
+    priority_tier: Optional[str]
 
 
 def orchestrator(state: AgentState) -> AgentState:
@@ -128,15 +266,54 @@ def orchestrator(state: AgentState) -> AgentState:
             "status": "disqualified",
         }
 
+    # LLM call for priority tier and routing flags
+    user_message = f""" 
+    Evaluate this Cummins facility for Accelera BESS deployment priority
+    under the Destination Zero strategy.
+
+    Facility Profile:
+    {json.dumps(profile, indent=2)}
+
+    Determine priority tier, routing flags, confidence, and rationale.
+    """
+    # Orchestrator Agent
+    try:
+        response = client.chat.completions.create(
+            model = "liquid/lfm-2.5-1.2b-thinking:free",
+            messages = [
+                {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature = 0.2,
+        )
+        raw = response.choices[0].message.content.strip()
+        #just in case the LLM wraps the JSON in ```
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        llm_output = json.loads(raw)
+    except Exception as e:
+        #default to monitor if LLM error occurs so it doesn't freeze
+        print(f"Orchestrator LLM error: {e}")
+        llm_output = {
+            "priority_tier": "MONITOR",
+            "ira_credit_flag": False,
+            "nmc_recommended_flag": False,
+            "confidence": "low",
+            "rationale": "LLM error; default to monitor.",
+        }
+    
+
     proposal_update(run_id, {"status": "routing"})
     agent_decision_append(
         run_id=run_id,
         facility_id=facility_id,
         agent_name="orchestrator",
-        input_summary="passed hard disqualifiers",
-        output_json={"next": "energy_load_agent"},
-        confidence="high",
-        rationale="Meets minimum thresholds; proceed to analysis.",
+        input_summary=f"passed hard disqualifiers. Facility: {profile.get('name', facility_id)}",
+        output_json= llm_output,
+        confidence= llm_output.get("confidence", "medium"),
+        rationale= llm_output.get("rationale", ""),
     )
 
     return {
@@ -145,27 +322,77 @@ def orchestrator(state: AgentState) -> AgentState:
         "facility_profile": profile,
         "disqualified": False,
         "status": "routing",
+        "ira_credit_flag": llm_output.get("ira_credit_flag", False),
+        "nmc_recommended_flag": llm_output.get("nmc_recommended_flag", False),
+        "priority_tier": llm_output.get("priority_tier", "MONITOR"),
     }
+
+
 
 
 def energy_load_agent(state: AgentState) -> AgentState:
     print("Energy Load Agent running...")
 
-    output = {"status": "complete"}
+    profile = state.get("facility_profile") or {}
+    nmc_flag = state.get("nmc_recommended_flag", False)
+
+    user_message = f"""
+    Analyze this Cummins facility's energy load and diesel runtime profile. 
+    Recommend an Accelera BESS configuration to reduce diesel runtime and handle peak demand events.
+
+    Facility profile:
+    {json.dumps(profile, indent = 2)}
+
+    NMC recommended flag (extreme cold climate override): {nmc_flag}
+
+    Determine diesel runtime reduction, peak event coverage, product recommendation, module count, 
+    climate risk, confidence, and rationale.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model = "liquid/lfm-2.5-1.2b-thinking:free",
+            messages = [
+                {"role": "system", "content": ENERGY_LOAD_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature = 0.2
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        llm_output = json.loads(raw)
+    except Exception as e:
+        print(f"Energy Load Agent LLM error: {e}")
+        #fall back. we pull from facility fields directly
+        load_kw = profile.get("facility_power_load_kw", 500)
+        runtime = profile.get("annual_diesel_runtime_hours", 1000)
+        llm_output = {
+            "diesel_runtime_reduction_hrs": int(runtime * 0.6),
+            "peak_events_addressable_pct": 0.7,
+            "recommended_product": "BP97E" if nmc_flag else "BP104E",
+            "recommended_module_count": 4 if load_kw >= 400 else 2,
+            "recommended_kwh_total": 800 if load_kw >= 400 else 400,
+            "climate_risk_flag": nmc_flag or profile.get("monthly_grid_outage_count", 0) >= 3,
+            "confidence": "low",
+            "rationale": "LLM error. Fallback estimates used based on facility load and runtime fields.",
+        }
 
     agent_decision_append(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         agent_name="energy_load_agent",
-        input_summary="Generated placeholder energy load analysis output.",
-        output_json=output,
-        confidence="medium",
-        rationale="Current implementation is a placeholder agent.",
+        input_summary=f"Facility: {profile.get('name', state['facility_id'])} | Load: {profile.get('facility_power_load_kw')}kW | Runtime: {profile.get('annual_diesel_runtime_hours')}hrs/yr | NMCflag: {nmc_flag} ",
+        output_json= llm_output,
+        confidence= llm_output.get("confidence", "medium"),
+        rationale= llm_output.get("rationale", ""),
     )
 
     return {
         **state,
-        "energy_load_output": output,
+        "energy_load_output": llm_output,
         "status": "energy_load_done",
     }
 
@@ -173,21 +400,87 @@ def energy_load_agent(state: AgentState) -> AgentState:
 def battery_sizing_agent(state: AgentState) -> AgentState:
     print("Battery Sizing Agent running...")
 
-    output = {"status": "complete"}
+    profile = state.get("facility_profile") or {}
+    energy_load_output = state.get("energy_load_output") or {}
+    ira_flag = state.get("ira_credit_flag", False)
+
+    user_message = f"""
+    Model the financial case for adding an Accelera BESS at this Cummins facility.
+
+    Facility profile:
+    {json.dumps(profile, indent = 2)}
+
+    Energy Load Agent output:
+    {json.dumps(energy_load_output, indent = 2)}
+
+    IRA credit flag (apply 30% ITC if true): {ira_flag}
+
+    Calculate all three scenarios, CapEx with IRA adjustment, payback, 
+    5-year NPV, and CO2 avoided. Ground the rationale in Destination Zero context.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model = "liquid/lfm-2.5-1.2b-thinking:free",
+            messages = [
+                {"role": "system", "content": BATTERY_SIZING_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature = 0.2,
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        llm_output = json.loads(raw)
+
+    except Exception as e:
+        print(f"Battery Sizing Agent LLM error: {e}")
+
+        #fall back estimates using the facility fields
+        demand = profile.get("monthly_demand_charge_usd", 5000) * 12
+        diesel = profile.get("annual_diesel_fuel_cost", 30000)
+        grid = profile.get("grid_electricity_rate_kwh", 0.12)
+        load = profile.get("facility_power_load_kw", 500)
+        modules = energy_load_output.get("recommended_module_count", 4)
+        gross_capex = modules * 187500
+        ira_credit = int(gross_capex * 0.30) if ira_flag else 0
+        net_capex = gross_capex - ira_credit
+        annual_savings = int(demand * 0.25 + diesel * 0.6)
+        payback = round(net_capex / annual_savings, 1) if annual_savings > 0 else 99.0
+        llm_output = {
+        "scenario_continue_as_is_annual_cost_usd": int(demand + diesel),
+        "scenario_upgrade_diesel_annual_cost_usd": int(demand + diesel * 0.85 + 18000),
+        "scenario_add_battery_annual_cost_usd": int(demand * 0.75 + diesel * 0.4),
+        "gross_capex_usd": gross_capex,
+        "ira_credit_amount_usd": ira_credit,
+        "ira_adjusted_capex_usd": net_capex,
+        "payback_years": payback,
+        "npv_5yr_usd": int(annual_savings * 3.99 - net_capex),
+        "annual_demand_charge_savings_usd": int(demand * 0.25),
+        "annual_diesel_cost_eliminated_usd": int(diesel * 0.6),
+        "co2_avoided_metric_tons_per_year": round(
+            energy_load_output.get("diesel_runtime_reduction_hrs", 500)
+            * load * 0.6 * 0.000293, 1
+        ),
+        "confidence": "low",
+        "rationale": "LLM error. Fallback estimates used. Manual review required.",
+        }
 
     agent_decision_append(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         agent_name="battery_sizing_agent",
-        input_summary="Generated placeholder battery sizing output.",
-        output_json=output,
-        confidence="medium",
-        rationale="Current implementation is a placeholder agent.",
+        input_summary=f"Facility: {profile.get('name', state['facility_id'])} | Modules: {energy_load_output.get('recommended_module_count')} x {energy_load_output.get('recommended_product')} | IRA eligible: {ira_flag}",
+        output_json=llm_output,
+        confidence=llm_output.get("confidence", "medium"),
+        rationale=llm_output.get("rationale", ""),
     )
 
     return {
         **state,
-        "battery_sizing_output": output,
+        "battery_sizing_output": llm_output,
         "status": "battery_sizing_done",
     }
 
@@ -198,6 +491,9 @@ def build_final_proposal(state: AgentState) -> Dict[str, Any]:
         "facility_profile": state.get("facility_profile"),
         "energy_load_output": state.get("energy_load_output"),
         "battery_sizing_output": state.get("battery_sizing_output"),
+        "priority_tier": state.get("priority_tier"),
+        "ira_credit_flag": state.get("ira_credit_flag"),
+        "nmc_recommended_flag": state.get("nmc_recommended_flag"),
         "recommendation_status": "draft_ready",
     }
 
