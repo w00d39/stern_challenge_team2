@@ -1,5 +1,7 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Optional, Dict, Any
+from openai import OpenAI
+import os, json
 
 from firestore_tools import (
     facility_profile_get,
@@ -8,6 +10,53 @@ from firestore_tools import (
     proposal_save_draft,
     agent_decision_append,
 )
+
+
+# OpenAI client for OpenRouter to initialize for later purposes
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+)
+
+ORCHESTRATOR_SYSTEM_PROMPT = """ 
+You are the Battery Transition Orchestrator for Cummins Inc.'s internal
+Accelera Battery System Decision Tool
+
+Cummins has committed to reducing absolute Scope 1 and Scope 2 greenhouse
+gas emissions from its own facilities and operations by 2030 under its Destination
+Zero strategy. As of 2023, Cummins has achieved a 31% reduction. The remaining 
+reductions require capital decisions at the facility level; including transitioning
+diesel backup generator runtime to Accelera battery energy storage systems (BESS).
+
+Your role is to evaluate a Cummins facility profile and determine:
+1. The facility's priority tier for Accelera BESS deployment
+2. Which routing flags to pass to downstream agents
+3. A plain-English rationale grounded in Destination Zero context
+
+Piority tiers:
+- HIGH: Strong financial case AND meaningful Scope 1 reduction potential.
+- MEDIUM: Viable case but marginal on one or more dimensions. Worth analyzing but not urgent.
+- MONITOR: Passes minimum thresholds but weak overall case. Revisit in 12 months.
+
+Routing flags you may set:
+- IRA_CREDIT_FLAG: true if ira_eligible = true. Instructs Battery Sizing 
+  Agent to apply 30% ITC to CapEx calculation.
+- NMC_RECOMMENDED: true if climate_zone = extreme_cold. Instructs Energy 
+  Load Agent to recommend BP97E instead of BP104E.
+
+You must respond with a JSON object and NOTHING else. No explanation 
+outside the JSON.
+
+{
+  "priority_tier": "HIGH" | "MEDIUM" | "MONITOR",
+  "ira_credit_flag": true | false,
+  "nmc_recommended_flag": true | false,
+  "confidence": "high" | "medium" | "low",
+  "rationale": 
+  "2-3 sentences grounded in Destination Zero context. Reference specific facility fields. Explain why this facility does or does not represent a strong decarbonization opportunity for Cummins."
+}
+
+"""
 
 
 class AgentState(TypedDict):
@@ -23,6 +72,13 @@ class AgentState(TypedDict):
     status: str
     disqualified: bool
     disqualifier_reason: Optional[str]
+
+    #priority_tier helps with sorting now and later on
+    #ira is for battery agent to get that tax credit if applicable
+    #nmc = product trigger flag for reccomended product in ELA
+    ira_credit_flag: Optional[bool]
+    nmc_recommended_flag: Optional[bool]
+    priority_tier: Optional[str]
 
 
 def orchestrator(state: AgentState) -> AgentState:
@@ -128,15 +184,54 @@ def orchestrator(state: AgentState) -> AgentState:
             "status": "disqualified",
         }
 
+    # LLM call for priority tier and routing flags
+    user_message = f""" 
+    Evaluate this Cummins facility for Accelera BESS deployment priority
+    under the Destination Zero strategy.
+
+    Facility Profile:
+    {json.dumps(profile, indent=2)}
+
+    Determine priority tier, routing flags, confidence, and rationale.
+    """
+    # Orchestrator Agent
+    try:
+        response = client.chat.completions.create(
+            model = "liquid/lfm-2.5-1.2b-thinking:free",
+            messages = [
+                {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature = 0.2,
+        )
+        raw = response.choices[0].message.content.strip()
+        #just in case the LLM wraps the JSON in ```
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startsswith("json"):
+                raw = raw[4:]
+        llm_output = json.loads(raw)
+    except Exception as e:
+        #default to monitor if LLM error occurs so it doesn't freeze
+        print(f"Orchestrator LLM error: {e}")
+        llm_output = {
+            "priority_tier": "MONITOR",
+            "ira_credit_flag": False,
+            "nmc_recommended_flag": False,
+            "confidence": "low",
+            "rationale": "LLM error; default to monitor.",
+        }
+    
+
     proposal_update(run_id, {"status": "routing"})
     agent_decision_append(
         run_id=run_id,
         facility_id=facility_id,
         agent_name="orchestrator",
-        input_summary="passed hard disqualifiers",
-        output_json={"next": "energy_load_agent"},
-        confidence="high",
-        rationale="Meets minimum thresholds; proceed to analysis.",
+        input_summary=f"passed hard disqualifiers. Facility: {profile.get('name', facility_id)}",
+        output_json= llm_output,
+        confidence= llm_output.get("confidence", "medium"),
+        rationale= llm_output.get("rationale", ""),
     )
 
     return {
@@ -145,6 +240,9 @@ def orchestrator(state: AgentState) -> AgentState:
         "facility_profile": profile,
         "disqualified": False,
         "status": "routing",
+        "ira_credit_flag": llm_output.get("ira_credit_flag", False),
+        "nmc_recommended_flag": llm_output.get("nmc_recommended_flag", False),
+        "priority_tier": llm_output.get("priority_tier", "MONITOR"),
     }
 
 
