@@ -425,6 +425,7 @@
   grid-template-columns: 380px 1fr;
   gap: 20px;
   align-items: start;
+  max-height: calc(100vh - 140px);
 }
 
 .panel {
@@ -433,12 +434,26 @@
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
 }
 .panel h2 {
   font-size: 18px;
   font-weight: 600;
   color: #1a1a2e;
   margin: 0 0 16px 0;
+}
+
+/* ── Run Selector (Director multi-run) ── */
+.run-selector {
+  background: #f0f4f8;
+  border: 1px solid #d0dbe6;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.run-selector .select {
+  width: 100%;
 }
 
 /* ── Proposal Queue ── */
@@ -653,6 +668,99 @@
 }
 .audit-json {
   margin-top: 10px;
+}
+
+/* ── Revision Section (Engineer) ── */
+.revision-section {
+  border-left: 4px solid #f57c00;
+}
+.revision-card {
+  background: #fffdf5;
+  border: 1px solid #ffe0b2;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.revision-card:last-child {
+  margin-bottom: 0;
+}
+.revision-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.revision-feedback {
+  background: #fff8e1;
+  border-left: 3px solid #f57c00;
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.revision-run-area {
+  border-top: 1px solid #ffe0b2;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+/* ── Facility Proposal Status (Engineer) ── */
+.facility-proposal-status {
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 16px;
+}
+
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #e0e0e0;
+}
+.tab {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #888;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab:hover {
+  color: #1b3a5c;
+}
+.tab.active {
+  color: #1b3a5c;
+  border-bottom-color: #1b3a5c;
+}
+.tab-badge {
+  background: #ef5350;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-left: 8px;
+}
+
+/* ── Truncate ── */
+.truncate {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: bottom;
 }
 
 /* ── Unauthorized ── */

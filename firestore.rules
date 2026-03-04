@@ -29,8 +29,7 @@ service cloud.firestore {
     }
 
     match /proposals/{runID} {
-      allow read: if isDirector() || isAuditor()
-          || (isFacilityEngineer() && resource.data.facility_id == request.auth.uid);
+      allow read: if isSignedIn();
       allow update: if isDirector()
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['status','reviewer_uid', 'feedback_text', 

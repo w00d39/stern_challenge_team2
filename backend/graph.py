@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, Optional, Dict, Any
 from openai import OpenAI
-import os, json
+import os, json, re
 
 from firestore_tools import (
     facility_profile_get,
@@ -11,12 +11,35 @@ from firestore_tools import (
     agent_decision_append,
 )
 
+LLM_MODEL = "liquid/lfm-2.5-1.2b-thinking:free"
 
 # OpenAI client for OpenRouter to initialize for later purposes
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
 )
+
+
+def extract_json(raw: str) -> dict:
+    """Extract a JSON object from LLM output, handling thinking tokens,
+    markdown fences, and other preamble text."""
+    # Strip thinking tokens (<think>...</think>)
+    if "</think>" in raw:
+        raw = raw.split("</think>")[-1].strip()
+    # Strip markdown code fences
+    if "```" in raw:
+        parts = raw.split("```")
+        for part in parts[1:]:
+            cleaned = part.strip()
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+            if cleaned.startswith("{"):
+                return json.loads(cleaned)
+    # Try to find a JSON object directly
+    match = re.search(r'\{[\s\S]*\}', raw)
+    if match:
+        return json.loads(match.group())
+    return json.loads(raw)
 
 ORCHESTRATOR_SYSTEM_PROMPT = """ 
 You are the Battery Transition Orchestrator for Cummins Inc.'s internal
@@ -266,33 +289,38 @@ def orchestrator(state: AgentState) -> AgentState:
             "status": "disqualified",
         }
 
-    # LLM call for priority tier and routing flags
+    feedback_block = ""
+    if state.get("human_feedback"):
+        feedback_block = f"""
+    IMPORTANT — The Sustainability Director reviewed a previous analysis of this
+    facility and requested revision with the following feedback:
+    "{state['human_feedback']}"
+
+    Take this feedback into account when making your assessment. Adjust your
+    priority tier, routing flags, and rationale accordingly.
+    """
+
     user_message = f""" 
     Evaluate this Cummins facility for Accelera BESS deployment priority
     under the Destination Zero strategy.
 
     Facility Profile:
     {json.dumps(profile, indent=2, default=str)}
-
+    {feedback_block}
     Determine priority tier, routing flags, confidence, and rationale.
     """
     # Orchestrator Agent
     try:
         response = client.chat.completions.create(
-            model = "liquid/lfm-2.5-1.2b-thinking:free",
-            messages = [
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
                 {"role": "user", "content": user_message},
             ],
-            temperature = 0.2,
+            temperature=0.2,
         )
         raw = response.choices[0].message.content.strip()
-        #just in case the LLM wraps the JSON in ```
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        llm_output = json.loads(raw)
+        llm_output = extract_json(raw)
     except Exception as e:
         #default to monitor if LLM error occurs so it doesn't freeze
         print(f"Orchestrator LLM error: {e}")
@@ -336,6 +364,17 @@ def energy_load_agent(state: AgentState) -> AgentState:
     profile = state.get("facility_profile") or {}
     nmc_flag = state.get("nmc_recommended_flag", False)
 
+    feedback_block = ""
+    if state.get("human_feedback"):
+        feedback_block = f"""
+    IMPORTANT — The Sustainability Director reviewed a previous analysis and
+    requested revision with the following feedback:
+    "{state['human_feedback']}"
+
+    Adjust your energy load analysis, product recommendation, and sizing
+    accordingly based on this feedback.
+    """
+
     user_message = f"""
     Analyze this Cummins facility's energy load and diesel runtime profile. 
     Recommend an Accelera BESS configuration to reduce diesel runtime and handle peak demand events.
@@ -344,26 +383,22 @@ def energy_load_agent(state: AgentState) -> AgentState:
     {json.dumps(profile, indent=2, default=str)}
 
     NMC recommended flag (extreme cold climate override): {nmc_flag}
-
+    {feedback_block}
     Determine diesel runtime reduction, peak event coverage, product recommendation, module count, 
     climate risk, confidence, and rationale.
     """
 
     try:
         response = client.chat.completions.create(
-            model = "liquid/lfm-2.5-1.2b-thinking:free",
-            messages = [
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": ENERGY_LOAD_SYSTEM_PROMPT},
                 {"role": "user", "content": user_message},
             ],
-            temperature = 0.2
+            temperature=0.2,
         )
         raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        llm_output = json.loads(raw)
+        llm_output = extract_json(raw)
     except Exception as e:
         print(f"Energy Load Agent LLM error: {e}")
         #fall back. we pull from facility fields directly
@@ -404,6 +439,17 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
     energy_load_output = state.get("energy_load_output") or {}
     ira_flag = state.get("ira_credit_flag", False)
 
+    feedback_block = ""
+    if state.get("human_feedback"):
+        feedback_block = f"""
+    IMPORTANT — The Sustainability Director reviewed a previous analysis and
+    requested revision with the following feedback:
+    "{state['human_feedback']}"
+
+    Adjust your financial projections, scenario modeling, and rationale
+    accordingly based on this feedback.
+    """
+
     user_message = f"""
     Model the financial case for adding an Accelera BESS at this Cummins facility.
 
@@ -414,26 +460,22 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
     {json.dumps(energy_load_output, indent = 2, default=str)}
 
     IRA credit flag (apply 30% ITC if true): {ira_flag}
-
+    {feedback_block}
     Calculate all three scenarios, CapEx with IRA adjustment, payback, 
     5-year NPV, and CO2 avoided. Ground the rationale in Destination Zero context.
     """
 
     try:
         response = client.chat.completions.create(
-            model = "liquid/lfm-2.5-1.2b-thinking:free",
-            messages = [
+            model=LLM_MODEL,
+            messages=[
                 {"role": "system", "content": BATTERY_SIZING_SYSTEM_PROMPT},
                 {"role": "user", "content": user_message},
             ],
-            temperature = 0.2,
+            temperature=0.2,
         )
         raw = response.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        llm_output = json.loads(raw)
+        llm_output = extract_json(raw)
 
     except Exception as e:
         print(f"Battery Sizing Agent LLM error: {e}")
