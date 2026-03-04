@@ -51,8 +51,22 @@ export default function SustainabilityDirector({ user }) {
     }
   }
 
+  // Normalize urgency for sorting: legacy values (>10) map to 3 so they sort with HIGH
+  const effectiveUrgency = (u) => {
+    const v = u ?? 0
+    return v > 10 ? 3 : v
+  }
+  const urgencyLabel = (p) => {
+    const tier = p.proposal_json?.priority_tier
+    if (tier) return tier
+    const u = p.urgency_score ?? 0
+    if (u > 10) return 'HIGH' // legacy
+    if (u >= 2.5) return 'HIGH'
+    if (u >= 1.5) return 'MEDIUM'
+    return 'MONITOR'
+  }
   const queue = Object.values(latestByFacility)
-    .sort((a, b) => (b.latest.urgency_score || 0) - (a.latest.urgency_score || 0))
+    .sort((a, b) => effectiveUrgency(b.latest.urgency_score) - effectiveUrgency(a.latest.urgency_score))
 
   const selected = queue.find((q) => q.latest.facility_id === selectedFacility)?.latest || null
 
@@ -124,9 +138,9 @@ export default function SustainabilityDirector({ user }) {
                   >
                     <div className="proposal-card-header">
                       <strong>{fid}</strong>
-                      {p.urgency_score != null && (
+                      {(p.urgency_score != null || p.proposal_json?.priority_tier) && (
                         <span className="badge badge-urgency">
-                          Urgency: {Math.round(p.urgency_score).toLocaleString()}
+                          Urgency: {urgencyLabel(p)}
                         </span>
                       )}
                     </div>
@@ -139,13 +153,8 @@ export default function SustainabilityDirector({ user }) {
                         {item.totalPending - 1} older run{item.totalPending - 1 > 1 ? 's' : ''} superseded
                       </div>
                     )}
-                    {p.proposal_json?.priority_tier && (
-                      <span className={`badge badge-tier-${p.proposal_json.priority_tier.toLowerCase()}`}>
-                        {p.proposal_json.priority_tier}
-                      </span>
-                    )}
                     {p.proposal_json?.ira_credit_flag && (
-                      <span className="badge badge-ira" style={{ marginLeft: 6 }}>
+                      <span className="badge badge-ira" style={{ marginTop: 6, display: 'inline-block' }}>
                         IRA Eligible
                       </span>
                     )}

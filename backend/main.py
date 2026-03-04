@@ -1,4 +1,5 @@
 import os
+import uuid
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
@@ -97,7 +98,7 @@ from graph import app_graph
 
 @app.post("/test-graph")
 async def test_graph(body: TestGraphRequest):
-    import uuid
+    run_id = body.run_id or uuid.uuid4().hex
 
     result = app_graph.invoke(
        {
@@ -215,7 +216,11 @@ async def run_graph_stream(
             yield f"data: {json.dumps(running_payload)}\n\n"
             await asyncio.sleep(0)
 
-            result = app_graph.invoke(init_state)
+            thread_id = uuid.uuid4().hex
+            result = app_graph.invoke(
+                init_state,
+                config={"configurable": {"thread_id": thread_id}},
+            )
 
             finished_payload = {
                 "stage": "finished",

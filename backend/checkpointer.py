@@ -19,8 +19,8 @@ class FirestoreCheckpointer(BaseCheckpointSaver):
         thread_id = config["configurable"]["thread_id"]
         self.db.collection("checkpoints").document(thread_id).set(
             {
-                "checkpoint": json.dumps(checkpoint),
-                "metadata": json.dumps(metadata),
+                "checkpoint": json.dumps(checkpoint, default=str),
+                "metadata": json.dumps(metadata, default=str),
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }
         )
@@ -30,7 +30,7 @@ class FirestoreCheckpointer(BaseCheckpointSaver):
         thread_id = config["configurable"]["thread_id"]
         self.db.collection("checkpoints").document(f"{thread_id}_writes").set(
             {
-                "writes": json.dumps([(w[0], w[1]) for w in writes]),
+                "writes": json.dumps([(w[0], w[1]) for w in writes], default=str),
                 "task_id": task_id,
                 "task_path": task_path,
                 "updated_at": firestore.SERVER_TIMESTAMP,

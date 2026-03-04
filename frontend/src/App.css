@@ -569,12 +569,20 @@
 }
 
 /* ── Proposal Queue ── */
+.queue-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.queue-panel .proposal-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .proposal-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(100vh - 220px);
-  overflow-y: auto;
 }
 .proposal-card {
   padding: 14px;
