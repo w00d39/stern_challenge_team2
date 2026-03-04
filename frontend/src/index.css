@@ -4,16 +4,86 @@
   padding: 0;
 }
 
+/* ─── Columbus / Cummins Design Tokens ─── */
+
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --c-red: #9B2335;
+  --c-red-deep: #6E1423;
+  --c-stone: #D4C5A9;
+  --c-sand: #E8DCC8;
+  --c-mustard: #B8872E;
+  --c-amber: #D4A843;
+  --c-teal: #1F5C5C;
+  --c-teal-light: #2D7A7A;
+  --c-graphite: #1E1E20;
+  --c-steel: #3C3C3E;
+  --c-concrete: #767068;
+  --c-warm: #C4BAA8;
+  --c-cream: #FAF5EB;
+  --c-linen: #F2EBD9;
+  --c-olive: #4A5A3A;
+
+  --font-display: 'Outfit', 'Helvetica Neue', sans-serif;
+  --font-heading: 'DM Sans', 'Helvetica Neue', sans-serif;
+  --font-body: 'Atkinson Hyperlegible', 'Verdana', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+
+  font-family: var(--font-body);
   line-height: 1.6;
   font-weight: 400;
-  color: #1a1a2e;
-  background-color: #f0f2f5;
+  color: var(--c-graphite);
+  background-color: var(--c-cream);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── CVD: Deuteranopia ─── */
+.cvd-deuteranopia {
+  --c-red: #7B3B1A;
+  --c-red-deep: #5A2810;
+  --c-mustard: #C49000;
+  --c-teal: #1A4B7A;
+  --c-teal-light: #2A6699;
+  --c-olive: #3E4F6A;
+}
+
+/* ─── CVD: Protanopia ─── */
+.cvd-protanopia {
+  --c-red: #6B4020;
+  --c-red-deep: #4A2C14;
+  --c-mustard: #C08C00;
+  --c-teal: #1B4A78;
+  --c-teal-light: #286198;
+  --c-olive: #3C4E68;
+}
+
+/* ─── CVD: Tritanopia ─── */
+.cvd-tritanopia {
+  --c-red: #9B2335;
+  --c-red-deep: #6E1423;
+  --c-mustard: #A86848;
+  --c-amber: #C08868;
+  --c-teal: #5C2A5C;
+  --c-teal-light: #7A3D7A;
+  --c-olive: #5C3E3A;
+}
+
+/* ─── CVD: High Contrast ─── */
+.cvd-highContrast {
+  --c-red: #8B0000;
+  --c-red-deep: #5C0000;
+  --c-mustard: #996600;
+  --c-amber: #CC9933;
+  --c-teal: #004040;
+  --c-teal-light: #006060;
+  --c-graphite: #0A0A0A;
+  --c-steel: #2A2A2A;
+  --c-concrete: #5C5650;
+  --c-cream: #FFFFFF;
+  --c-linen: #F5F0E4;
+  --c-olive: #2A3A1A;
 }
 
 body {
@@ -27,7 +97,7 @@ body {
 }
 
 a {
-  color: #1b3a5c;
+  color: var(--c-teal);
   text-decoration: none;
 }
 a:hover {

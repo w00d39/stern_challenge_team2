@@ -89,14 +89,14 @@ export default function Auditor() {
         <KpiCard
           label="Pending Review"
           value={kpis.pendingReview}
-          color="#e65100"
+          color="var(--c-mustard)"
         />
-        <KpiCard label="Approved" value={kpis.approved} color="#2e7d32" />
-        <KpiCard label="Rejected" value={kpis.rejected} color="#c62828" />
+        <KpiCard label="Approved" value={kpis.approved} color="var(--c-teal)" />
+        <KpiCard label="Rejected" value={kpis.rejected} color="var(--c-red)" />
         <KpiCard
           label="Revision Requested"
           value={kpis.revisionRequested}
-          color="#f9a825"
+          color="var(--c-mustard)"
         />
         <KpiCard label="Agent Decisions" value={kpis.totalDecisions} />
       </div>
@@ -119,7 +119,7 @@ export default function Auditor() {
             value={filterFacilityId}
             onChange={(e) => setFilterFacilityId(e.target.value)}
           />
-          <span style={{ fontSize: 13, color: '#888', alignSelf: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--c-concrete)', alignSelf: 'center' }}>
             Showing {filtered.length} of {decisions.length} entries
           </span>
         </div>
