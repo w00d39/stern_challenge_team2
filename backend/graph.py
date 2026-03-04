@@ -3,6 +3,8 @@ from typing import TypedDict, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 from openai import OpenAI
 import os, json, re
+from checkpointer import FirestoreCheckpointer
+
 
 from firestore_tools import (
     facility_profile_get,
@@ -387,8 +389,16 @@ def orchestrator(state: AgentState) -> AgentState:
             "status": "failed",
         }
     
+    ira_flag = bool(profile.get("ira_eligible", False))
+    nmc_flag = profile.get("climate_zone", "") == "extreme_cold"
 
-    proposal_update(run_id, {"status": "routing"})
+    proposal_update(run_id, {
+        "status": "routing",
+        "urgency_score": {"HIGH": 3, "MEDIUM": 2, "MONITOR": 1}.get(
+            llm_output.get("priority_tier", "MONITOR"), 1
+                ),        
+        })
+
     agent_decision_append(
         run_id=run_id,
         facility_id=facility_id,
@@ -405,8 +415,8 @@ def orchestrator(state: AgentState) -> AgentState:
         "facility_profile": profile,
         "disqualified": False,
         "status": "routing",
-        "ira_credit_flag": llm_output.get("ira_credit_flag", False),
-        "nmc_recommended_flag": llm_output.get("nmc_recommended_flag", False),
+        "ira_credit_flag": ira_flag,
+        "nmc_recommended_flag": nmc_flag,
         "priority_tier": llm_output.get("priority_tier", "MONITOR"),
     }
 
@@ -631,6 +641,7 @@ def build_graph():
         route_after_orchestrator,
         {
             "energy_load_agent": "energy_load_agent",
+            "battery_sizing_agent": "battery_sizing_agent",
             "end": END,
         },
     )
@@ -639,7 +650,7 @@ def build_graph():
     graph.add_edge("battery_sizing_agent", "review_node")
     graph.add_edge("review_node", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer = FirestoreCheckpointer())
 
 
 app_graph = build_graph()
