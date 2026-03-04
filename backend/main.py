@@ -6,6 +6,9 @@ from firebase_admin import credentials, firestore, auth
 from firestore_tools import proposal_update_decision
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 
 load_dotenv(dotenv_path=".env")
 
@@ -48,6 +51,9 @@ def verify_bearer_token(authorization: str | None):
 class ProposalDecisionRequest(BaseModel):
     status: str
     feedback_text: str | None = None
+    
+class RunRequest(BaseModel):
+    facility_id: str
 
 @app.get("/ping")
 async def ping():
@@ -142,3 +148,59 @@ async def decide_proposal(
         feedback_text=body.feedback_text,
     )
     return {"ok": True, "run_id": run_id, "status": body.status}
+
+@app.post("/run")
+async def run_graph_stream(
+    body: RunRequest,
+    authorization: str | None = Header(default=None),
+):
+    decoded = verify_bearer_token(authorization)
+    role = decoded.get("role")
+    if role not in {"facility_engineer", "sustainability_director"}:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    async def event_generator():
+        try:
+            started_payload = {
+                "stage": "started",
+                "facility_id": body.facility_id,
+            }
+            yield f"data: {json.dumps(started_payload)}\n\n"
+
+            init_state = {
+                "facility_id": body.facility_id,
+                "run_id": None,
+                "facility_profile": None,
+                "energy_load_output": None,
+                "battery_sizing_output": None,
+                "human_feedback": None,
+                "final_proposal": None,
+                "status": "starting",
+                "disqualified": False,
+                "disqualifier_reason": None,
+            }
+
+            running_payload = {
+                "stage": "running_orchestrator",
+            }
+            yield f"data: {json.dumps(running_payload)}\n\n"
+            await asyncio.sleep(0)
+
+            result = app_graph.invoke(init_state)
+
+            finished_payload = {
+                "stage": "finished",
+                "status": result.get("status"),
+                "disqualified": result.get("disqualified"),
+                "run_id": result.get("run_id"),
+            }
+            yield f"data: {json.dumps(finished_payload)}\n\n"
+
+        except Exception as e:
+            error_payload = {
+                "stage": "error",
+                "error": str(e),
+            }
+            yield f"data: {json.dumps(error_payload)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
