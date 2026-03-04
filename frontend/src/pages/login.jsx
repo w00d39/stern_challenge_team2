@@ -27,7 +27,7 @@ export default function Login() {
       <div className="login-box">
         <h1 className="login-title">Accelera</h1>
         <p className="login-subtitle">
-          Cummins Facility Decarbonization &mdash; Destination Zero
+          Cummins Facility Decarbonization · Destination Zero
         </p>
 
         <div className="card">

@@ -191,10 +191,10 @@ class AgentState(TypedDict):
 
 class OrchestratorOutput(BaseModel):
     priority_tier: Literal["HIGH", "MEDIUM", "MONITOR"]
-    ira_credit_flag: bool
-    nmc_recommended_flag: bool
+    ira_credit_flag: bool = False
+    nmc_recommended_flag: bool = False
     confidence: Literal["high", "medium", "low"]
-    rationale: str = Field(min_length = 10)
+    rationale: str = Field(min_length=10, default="No rationale provided")
 
 class EnergyLoadOutput(BaseModel):
     diesel_runtime_reduction_hrs: int = Field(ge = 0)
@@ -204,7 +204,14 @@ class EnergyLoadOutput(BaseModel):
     recommended_kwh_total: int = Field(ge = 0)
     climate_risk_flag: bool
     confidence: Literal["high", "medium", "low"]
-    rationale: str = Field(min_length = 10)
+    rationale: str = Field(min_length=10, default="No rationale provided")
+
+    @field_validator("diesel_runtime_reduction_hrs", "recommended_kwh_total", mode="before")
+    @classmethod
+    def coerce_float_to_int(cls, v):
+        if isinstance(v, float):
+            return round(v)
+        return v
 
 class BatterySizingOutput(BaseModel):
     scenario_continue_as_is_annual_cost_usd: int = Field(ge=0)
@@ -219,7 +226,25 @@ class BatterySizingOutput(BaseModel):
     annual_diesel_cost_eliminated_usd: int = Field(ge=0)
     co2_avoided_metric_tons_per_year: float = Field(ge=0.0)
     confidence: Literal["high", "medium", "low"]
-    rationale: str = Field(min_length=10)
+    rationale: str = Field(min_length=10, default="No rationale provided")
+
+    @field_validator(
+        "scenario_continue_as_is_annual_cost_usd",
+        "scenario_upgrade_diesel_annual_cost_usd",
+        "scenario_add_battery_annual_cost_usd",
+        "gross_capex_usd",
+        "ira_credit_amount_usd",
+        "ira_adjusted_capex_usd",
+        "npv_5yr_usd",
+        "annual_demand_charge_savings_usd",
+        "annual_diesel_cost_eliminated_usd",
+        mode="before",
+    )
+    @classmethod
+    def coerce_float_to_int(cls, v):
+        if isinstance(v, float):
+            return round(v)
+        return v
 
     @field_validator("ira_adjusted_capex_usd")
     @classmethod
