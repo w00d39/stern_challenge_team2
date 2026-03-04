@@ -4,13 +4,13 @@ import { db } from '../lib/firebase'
 import { streamRun } from '../lib/api'
 
 const STATUS_STYLES = {
-  pending_review: { background: '#fff3e0', color: '#e65100', label: 'Pending Review' },
-  approved: { background: '#e8f5e9', color: '#2e7d32', label: 'Approved' },
-  rejected: { background: '#fce4ec', color: '#c62828', label: 'Rejected' },
-  revision_requested: { background: '#fff8e1', color: '#f57c00', label: 'Revision Requested' },
-  running: { background: '#e3f2fd', color: '#1565c0', label: 'Running' },
-  created: { background: '#f5f5f5', color: '#666', label: 'Created' },
-  disqualified: { background: '#fce4ec', color: '#c62828', label: 'Disqualified' },
+  pending_review: { background: 'rgba(184, 135, 46, 0.08)', color: 'var(--c-mustard)', label: 'Pending Review' },
+  approved: { background: 'rgba(31, 92, 92, 0.08)', color: 'var(--c-teal)', label: 'Approved' },
+  rejected: { background: 'rgba(155, 35, 53, 0.08)', color: 'var(--c-red)', label: 'Rejected' },
+  revision_requested: { background: 'rgba(184, 135, 46, 0.1)', color: 'var(--c-mustard)', label: 'Revision Requested' },
+  running: { background: '#e3f2fd', color: 'var(--c-teal-light)', label: 'Running' },
+  created: { background: '#f5f5f5', color: 'var(--c-concrete)', label: 'Created' },
+  disqualified: { background: 'rgba(155, 35, 53, 0.08)', color: 'var(--c-red)', label: 'Disqualified' },
 }
 
 function getTime(p) {
@@ -168,7 +168,7 @@ export default function FacilityEngineer({ user }) {
         </button>
         <button className={`tab ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
           History
-          {history.length > 0 && <span className="tab-badge" style={{ background: '#1b3a5c' }}>{history.length}</span>}
+          {history.length > 0 && <span className="tab-badge" style={{ background: 'var(--c-graphite)' }}>{history.length}</span>}
         </button>
       </div>
 
@@ -236,7 +236,7 @@ export default function FacilityEngineer({ user }) {
               </div>
 
               <div className="form-group" style={{ marginTop: 20 }}>
-                <label>Engineer Notes <span style={{ fontWeight: 400, color: '#888' }}>(optional — extra context, assumptions, or feedback from others)</span></label>
+                <label>Engineer Notes <span style={{ fontWeight: 400, color: 'var(--c-concrete)' }}>(optional — extra context, assumptions, or feedback from others)</span></label>
                 <textarea
                   className="textarea"
                   value={engineerNotes}
@@ -289,7 +289,7 @@ export default function FacilityEngineer({ user }) {
             <div className="empty-state">No revision requests right now. All caught up!</div>
           ) : (
             <div>
-              <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+              <p style={{ fontSize: 14, color: 'var(--c-concrete)', marginBottom: 16 }}>
                 These facilities have active revision cycles. They'll move to History once the director approves or rejects.
               </p>
               {revisionCycles.map((cycle) => {
@@ -318,12 +318,12 @@ export default function FacilityEngineer({ user }) {
                     )}
 
                     {isPendingReview && (
-                      <div style={{ fontSize: 13, color: '#1565c0', margin: '8px 0' }}>
+                      <div style={{ fontSize: 13, color: 'var(--c-teal-light)', margin: '8px 0' }}>
                         Re-run submitted — waiting for director review.
                       </div>
                     )}
 
-                    <div style={{ fontSize: 13, color: '#888', marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, color: 'var(--c-concrete)', marginBottom: 10 }}>
                       {r.updated_at?.toDate ? r.updated_at.toDate().toLocaleString() : ''}
                     </div>
 
@@ -343,7 +343,7 @@ export default function FacilityEngineer({ user }) {
                         <div className="form-group">
                           <label>
                             Your Notes
-                            <span style={{ fontWeight: 400, color: '#888' }}> — edit or add context before re-running</span>
+                            <span style={{ fontWeight: 400, color: 'var(--c-concrete)' }}> — edit or add context before re-running</span>
                           </label>
                           <textarea
                             className="textarea"
@@ -420,7 +420,7 @@ export default function FacilityEngineer({ user }) {
                     <strong>{p.facility_id}</strong>
                     <StatusBadge status={p.status} />
                   </div>
-                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.6 }}>
+                  <div style={{ fontSize: 13, color: 'var(--c-steel)', lineHeight: 1.6 }}>
                     <div><strong>Run ID:</strong> <span className="truncate" title={p.run_id || p.id}>{p.run_id || p.id}</span></div>
                     {p.reviewed_at && (
                       <div><strong>Reviewed:</strong> {fmtTs(p.reviewed_at)}</div>
@@ -473,7 +473,7 @@ function Detail({ label, value }) {
 }
 
 function StatusBadge({ status }) {
-  const style = STATUS_STYLES[status] || { background: '#f5f5f5', color: '#666', label: status }
+  const style = STATUS_STYLES[status] || { background: '#f5f5f5', color: 'var(--c-concrete)', label: status }
   return (
     <span className="badge" style={{ background: style.background, color: style.color }}>
       {style.label}

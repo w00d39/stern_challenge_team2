@@ -4,7 +4,7 @@ export default function Unauthorized({ user }) {
   return (
     <div className="unauthorized-container">
       <h1>Accelera</h1>
-      <p style={{ color: '#888', marginBottom: 24 }}>
+      <p style={{ color: 'var(--c-concrete)', marginBottom: 24 }}>
         Cummins Facility Decarbonization Platform
       </p>
 
@@ -13,7 +13,7 @@ export default function Unauthorized({ user }) {
         <p style={{ marginBottom: 12 }}>
           Signed in as <strong>{user.email}</strong>
         </p>
-        <p style={{ color: '#666', fontSize: 14, marginBottom: 20 }}>
+        <p style={{ color: 'var(--c-concrete)', fontSize: 14, marginBottom: 20 }}>
           Your account does not have a role assigned yet. Contact your
           administrator to be assigned one of: Facility Engineer, Sustainability
           Director, or Auditor.

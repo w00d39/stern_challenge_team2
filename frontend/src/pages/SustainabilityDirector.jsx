@@ -135,7 +135,7 @@ export default function SustainabilityDirector({ user }) {
                       {p.created_at && <span>{fmtTs(p.created_at)}</span>}
                     </div>
                     {item.totalPending > 1 && (
-                      <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: 'var(--c-concrete)', marginTop: 4 }}>
                         {item.totalPending - 1} older run{item.totalPending - 1 > 1 ? 's' : ''} superseded
                       </div>
                     )}

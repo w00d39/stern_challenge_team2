@@ -15,33 +15,23 @@ export default function Login() {
     try {
       await signInWithEmailAndPassword(auth, email, password)
     } catch (err) {
-  console.log('LOGIN ERROR', err)
-  setError(err.code || err.message || 'Login failed')
-} finally {
+      console.log('LOGIN ERROR', err)
+      setError(err.code || err.message || 'Login failed')
+    } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        padding: 24,
-      }}
-    >
-      <div style={{ width: '100%', maxWidth: 400 }}>
-        <h1 style={{ fontSize: 28, color: '#1b3a5c', marginBottom: 4 }}>
-          Accelera
-        </h1>
-        <p style={{ color: '#888', marginBottom: 32, fontSize: 14 }}>
-          Cummins Facility Decarbonization Platform &mdash; Destination Zero
+    <div className="login-container">
+      <div className="login-box">
+        <h1 className="login-title">Accelera</h1>
+        <p className="login-subtitle">
+          Cummins Facility Decarbonization &mdash; Destination Zero
         </p>
 
         <div className="card">
-          <h2 style={{ fontSize: 18, marginBottom: 20 }}>Sign In</h2>
+          <h2>Sign In</h2>
           <form onSubmit={handleLogin}>
             <div className="form-group">
               <label>Email</label>
@@ -68,7 +58,7 @@ export default function Login() {
               />
             </div>
             {error && (
-              <p style={{ color: '#c62828', fontSize: 14, marginBottom: 12 }}>
+              <p style={{ color: 'var(--c-red)', fontSize: 14, marginBottom: 12 }}>
                 {error}
               </p>
             )}
