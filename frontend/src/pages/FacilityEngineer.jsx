@@ -23,8 +23,8 @@ export default function FacilityEngineer({ user }) {
   const [events, setEvents] = useState([])
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [activeTab, setActiveTab] = useState('run')
 
-  // Load facility profiles
   useEffect(() => {
     async function loadFacilities() {
       try {
@@ -42,7 +42,6 @@ export default function FacilityEngineer({ user }) {
     loadFacilities()
   }, [])
 
-  // Load all proposals (for status indicators)
   useEffect(() => {
     async function loadProposals() {
       try {
@@ -55,7 +54,6 @@ export default function FacilityEngineer({ user }) {
     loadProposals()
   }, [result])
 
-  // Real-time listener for revision requests
   useEffect(() => {
     const q = query(
       collection(db, 'proposals'),
@@ -79,7 +77,6 @@ export default function FacilityEngineer({ user }) {
 
   const selected = facilities.find((f) => f.id === selectedId)
 
-  // Build a map: facility_id -> latest proposal status
   const facilityStatus = {}
   for (const p of proposals) {
     const fid = p.facility_id
@@ -94,7 +91,7 @@ export default function FacilityEngineer({ user }) {
     }
   }
 
-  const handleRunAnalysis = async (facilityId) => {
+  const handleRunAnalysis = async (facilityId, feedback) => {
     const targetId = facilityId || selectedId
     if (!targetId) return
 
@@ -102,6 +99,7 @@ export default function FacilityEngineer({ user }) {
       setSelectedId(facilityId)
     }
 
+    setActiveTab('run')
     setRunning(true)
     setEvents([])
     setResult(null)
@@ -112,6 +110,7 @@ export default function FacilityEngineer({ user }) {
     await streamRun({
       facilityId: targetId,
       token,
+      humanFeedback: feedback || null,
       onEvent: (evt) => {
         setEvents((prev) => [...prev, evt])
         if (evt.stage === 'finished') setResult(evt)
@@ -132,247 +131,211 @@ export default function FacilityEngineer({ user }) {
     <div className="page">
       <h1>Facility Engineer Dashboard</h1>
 
-      {/* Revision Requests */}
-      {revisions.length > 0 && (
-        <div className="card revision-section">
-          <h2>Revision Requests ({revisions.length})</h2>
-          <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
-            The Sustainability Director has requested revisions on these
-            proposals. Review the feedback and re-run analysis.
-          </p>
-          {revisions.map((r) => (
-            <div key={r.id} className="revision-card">
-              <div className="revision-header">
-                <strong>{r.facility_id}</strong>
-                <span className="badge" style={{ background: '#fff8e1', color: '#f57c00' }}>
-                  Revision #{r.revision_count || 1}
-                </span>
-              </div>
-              {r.feedback_text && (
-                <div className="revision-feedback">
-                  <strong>Director feedback:</strong> {r.feedback_text}
-                </div>
-              )}
-              <div style={{ fontSize: 13, color: '#888', marginBottom: 10 }}>
-                {r.updated_at?.toDate
-                  ? r.updated_at.toDate().toLocaleString()
-                  : ''}
-              </div>
-              <button
-                className="btn btn-primary"
-                style={{ padding: '8px 16px', fontSize: 13 }}
-                onClick={() => handleRunAnalysis(r.facility_id)}
-                disabled={running}
-              >
-                Re-run Analysis for {r.facility_id}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Facility Selector */}
-      <div className="card">
-        <h2>Select Facility</h2>
-        <select
-          className="select"
-          value={selectedId}
-          onChange={(e) => {
-            setSelectedId(e.target.value)
-            setEvents([])
-            setResult(null)
-            setError(null)
-          }}
+      <div className="tabs">
+        <button
+          className={`tab ${activeTab === 'run' ? 'active' : ''}`}
+          onClick={() => setActiveTab('run')}
         >
-          <option value="">— Choose a facility —</option>
-          {facilities.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name || f.id} ({f.id})
-            </option>
-          ))}
-        </select>
+          Run Analysis
+        </button>
+        <button
+          className={`tab ${activeTab === 'revisions' ? 'active' : ''}`}
+          onClick={() => setActiveTab('revisions')}
+        >
+          Revision Requests
+          {revisions.length > 0 && (
+            <span className="tab-badge">{revisions.length}</span>
+          )}
+        </button>
       </div>
 
-      {/* Facility Details */}
-      {selected && (
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ margin: 0 }}>{selected.name || selected.id}</h2>
-            {facilityStatus[selected.id] && (
-              <StatusBadge status={facilityStatus[selected.id].status} />
-            )}
+      {activeTab === 'run' && (
+        <>
+          {/* Facility Selector */}
+          <div className="card">
+            <h2>Select Facility</h2>
+            <select
+              className="select"
+              value={selectedId}
+              onChange={(e) => {
+                setSelectedId(e.target.value)
+                setEvents([])
+                setResult(null)
+                setError(null)
+              }}
+            >
+              <option value="">— Choose a facility —</option>
+              {facilities.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name || f.id} ({f.id})
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Show existing proposal info if any */}
-          {facilityStatus[selected.id] && (
-            <div className="facility-proposal-status">
-              <span>
-                Latest proposal: <strong>{facilityStatus[selected.id].status?.replace(/_/g, ' ')}</strong>
-              </span>
-              {facilityStatus[selected.id].run_id && (
-                <span> · Run ID: {facilityStatus[selected.id].run_id}</span>
-              )}
-              {facilityStatus[selected.id].feedback_text && (
-                <div style={{ marginTop: 6 }}>
-                  <strong>Feedback:</strong> {facilityStatus[selected.id].feedback_text}
+          {/* Facility Details */}
+          {selected && (
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h2 style={{ margin: 0 }}>{selected.name || selected.id}</h2>
+                {facilityStatus[selected.id] && (
+                  <StatusBadge status={facilityStatus[selected.id].status} />
+                )}
+              </div>
+
+              {facilityStatus[selected.id] && (
+                <div className="facility-proposal-status">
+                  <span>
+                    Latest proposal: <strong>{facilityStatus[selected.id].status?.replace(/_/g, ' ')}</strong>
+                  </span>
+                  {facilityStatus[selected.id].run_id && (
+                    <span> · Run ID: {facilityStatus[selected.id].run_id}</span>
+                  )}
+                  {facilityStatus[selected.id].feedback_text && (
+                    <div style={{ marginTop: 6 }}>
+                      <strong>Feedback:</strong> {facilityStatus[selected.id].feedback_text}
+                    </div>
+                  )}
                 </div>
               )}
+
+              <div className="detail-grid">
+                <Detail label="Facility ID" value={selected.facility_id || selected.id} />
+                <Detail label="Type" value={selected.facility_type} />
+                <Detail label="Climate Zone" value={selected.climate_zone} />
+                <Detail
+                  label="Power Load"
+                  value={selected.facility_power_load_kw != null ? `${selected.facility_power_load_kw} kW` : null}
+                />
+                <Detail
+                  label="Annual Diesel Runtime"
+                  value={selected.annual_diesel_runtime_hours != null ? `${selected.annual_diesel_runtime_hours} hrs` : null}
+                />
+                <Detail
+                  label="Monthly Demand Charge"
+                  value={selected.monthly_demand_charge_usd != null ? `$${Number(selected.monthly_demand_charge_usd).toLocaleString()}` : null}
+                />
+                <Detail
+                  label="Annual Diesel Fuel Cost"
+                  value={selected.annual_diesel_fuel_cost != null ? `$${Number(selected.annual_diesel_fuel_cost).toLocaleString()}` : null}
+                />
+                <Detail
+                  label="Grid Rate"
+                  value={selected.grid_electricity_rate_kwh != null ? `$${selected.grid_electricity_rate_kwh}/kWh` : null}
+                />
+                <Detail
+                  label="IRA Eligible"
+                  value={selected.ira_eligible != null ? (selected.ira_eligible ? 'Yes' : 'No') : null}
+                />
+                <Detail label="ESG Mandate" value={selected.esg_mandate} />
+                <Detail label="Grid Outages/Month" value={selected.monthly_grid_outage_count} />
+                <Detail
+                  label="Existing Solar"
+                  value={selected.existing_solar_kw != null ? `${selected.existing_solar_kw} kW` : null}
+                />
+              </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={() => handleRunAnalysis()}
+                disabled={running}
+                style={{ marginTop: 20 }}
+              >
+                {running ? 'Running Analysis...' : 'Run Analysis'}
+              </button>
             </div>
           )}
 
-          <div className="detail-grid">
-            <Detail label="Facility ID" value={selected.facility_id || selected.id} />
-            <Detail label="Type" value={selected.facility_type} />
-            <Detail label="Climate Zone" value={selected.climate_zone} />
-            <Detail
-              label="Power Load"
-              value={
-                selected.facility_power_load_kw != null
-                  ? `${selected.facility_power_load_kw} kW`
-                  : null
-              }
-            />
-            <Detail
-              label="Annual Diesel Runtime"
-              value={
-                selected.annual_diesel_runtime_hours != null
-                  ? `${selected.annual_diesel_runtime_hours} hrs`
-                  : null
-              }
-            />
-            <Detail
-              label="Monthly Demand Charge"
-              value={
-                selected.monthly_demand_charge_usd != null
-                  ? `$${Number(selected.monthly_demand_charge_usd).toLocaleString()}`
-                  : null
-              }
-            />
-            <Detail
-              label="Annual Diesel Fuel Cost"
-              value={
-                selected.annual_diesel_fuel_cost != null
-                  ? `$${Number(selected.annual_diesel_fuel_cost).toLocaleString()}`
-                  : null
-              }
-            />
-            <Detail
-              label="Grid Rate"
-              value={
-                selected.grid_electricity_rate_kwh != null
-                  ? `$${selected.grid_electricity_rate_kwh}/kWh`
-                  : null
-              }
-            />
-            <Detail
-              label="IRA Eligible"
-              value={
-                selected.ira_eligible != null
-                  ? selected.ira_eligible
-                    ? 'Yes'
-                    : 'No'
-                  : null
-              }
-            />
-            <Detail label="ESG Mandate" value={selected.esg_mandate} />
-            <Detail
-              label="Grid Outages/Month"
-              value={selected.monthly_grid_outage_count}
-            />
-            <Detail
-              label="Existing Solar"
-              value={
-                selected.existing_solar_kw != null
-                  ? `${selected.existing_solar_kw} kW`
-                  : null
-              }
-            />
-          </div>
+          {error && (
+            <div className="card error-card">
+              <strong>Error: </strong>{error}
+            </div>
+          )}
 
-          <button
-            className="btn btn-primary"
-            onClick={() => handleRunAnalysis()}
-            disabled={running}
-            style={{ marginTop: 20 }}
-          >
-            {running ? 'Running Analysis...' : 'Run Analysis'}
-          </button>
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="card error-card">
-          <strong>Error: </strong>
-          {error}
-        </div>
-      )}
-
-      {/* SSE Trace Panel */}
-      {events.length > 0 && (
-        <div className="card">
-          <h2>Analysis Trace</h2>
-          <div className="trace-panel">
-            {events.map((evt, i) => (
-              <div key={i} className={`trace-event trace-${evt.stage}`}>
-                <span className="trace-stage">{evt.stage}</span>
-                {evt.facility_id && (
-                  <span className="trace-detail">
-                    Facility: {evt.facility_id}
-                  </span>
-                )}
-                {evt.status && (
-                  <span className="trace-detail">Status: {evt.status}</span>
-                )}
-                {evt.disqualified != null && (
-                  <span className="trace-detail">
-                    Disqualified: {evt.disqualified ? 'Yes' : 'No'}
-                  </span>
-                )}
-                {evt.run_id && (
-                  <span className="trace-detail">Run ID: {evt.run_id}</span>
-                )}
-                {evt.error && (
-                  <span className="trace-detail error-text">{evt.error}</span>
-                )}
+          {events.length > 0 && (
+            <div className="card">
+              <h2>Analysis Trace</h2>
+              <div className="trace-panel">
+                {events.map((evt, i) => (
+                  <div key={i} className={`trace-event trace-${evt.stage}`}>
+                    <span className="trace-stage">{evt.stage}</span>
+                    {evt.facility_id && <span className="trace-detail">Facility: {evt.facility_id}</span>}
+                    {evt.status && <span className="trace-detail">Status: {evt.status}</span>}
+                    {evt.disqualified != null && (
+                      <span className="trace-detail">Disqualified: {evt.disqualified ? 'Yes' : 'No'}</span>
+                    )}
+                    {evt.run_id && <span className="trace-detail">Run ID: {evt.run_id}</span>}
+                    {evt.error && <span className="trace-detail error-text">{evt.error}</span>}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          )}
+
+          {result && result.stage === 'finished' && !result.disqualified && (
+            <div className="card success-card">
+              <h2>Analysis Complete</h2>
+              <p><strong>Run ID:</strong> {result.run_id}</p>
+              <p><strong>Status:</strong> {result.status}</p>
+              <p style={{ marginTop: 8 }}>
+                A proposal has been created and is now pending review by the Sustainability Director.
+              </p>
+            </div>
+          )}
+
+          {result && result.stage === 'finished' && result.disqualified && (
+            <div className="card warning-card">
+              <h2>Facility Disqualified</h2>
+              <p><strong>Run ID:</strong> {result.run_id}</p>
+              <p><strong>Status:</strong> {result.status}</p>
+              <p style={{ marginTop: 8 }}>
+                This facility did not meet the minimum thresholds for BESS deployment analysis.
+              </p>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Success — proposal created */}
-      {result && result.stage === 'finished' && !result.disqualified && (
-        <div className="card success-card">
-          <h2>Analysis Complete</h2>
-          <p>
-            <strong>Run ID:</strong> {result.run_id}
-          </p>
-          <p>
-            <strong>Status:</strong> {result.status}
-          </p>
-          <p style={{ marginTop: 8 }}>
-            A proposal has been created and is now pending review by the
-            Sustainability Director.
-          </p>
-        </div>
-      )}
-
-      {/* Disqualified */}
-      {result && result.stage === 'finished' && result.disqualified && (
-        <div className="card warning-card">
-          <h2>Facility Disqualified</h2>
-          <p>
-            <strong>Run ID:</strong> {result.run_id}
-          </p>
-          <p>
-            <strong>Status:</strong> {result.status}
-          </p>
-          <p style={{ marginTop: 8 }}>
-            This facility did not meet the minimum thresholds for BESS
-            deployment analysis.
-          </p>
-        </div>
+      {activeTab === 'revisions' && (
+        <>
+          {revisions.length === 0 ? (
+            <div className="empty-state">
+              No revision requests right now. All caught up!
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+                The Sustainability Director has requested revisions on these proposals. Review the feedback and re-run analysis.
+              </p>
+              {revisions.map((r) => (
+                <div key={r.id} className="revision-card">
+                  <div className="revision-header">
+                    <strong>{r.facility_id}</strong>
+                    <span className="badge" style={{ background: '#fff8e1', color: '#f57c00' }}>
+                      Revision #{r.revision_count || 1}
+                    </span>
+                  </div>
+                  {r.feedback_text && (
+                    <div className="revision-feedback">
+                      <strong>Director feedback:</strong> {r.feedback_text}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 10 }}>
+                    {r.updated_at?.toDate ? r.updated_at.toDate().toLocaleString() : ''}
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '8px 16px', fontSize: 13 }}
+                    onClick={() => handleRunAnalysis(r.facility_id, r.feedback_text)}
+                    disabled={running}
+                  >
+                    Re-run Analysis for {r.facility_id}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -390,10 +353,7 @@ function Detail({ label, value }) {
 function StatusBadge({ status }) {
   const style = STATUS_STYLES[status] || { background: '#f5f5f5', color: '#666', label: status }
   return (
-    <span
-      className="badge"
-      style={{ background: style.background, color: style.color }}
-    >
+    <span className="badge" style={{ background: style.background, color: style.color }}>
       {style.label}
     </span>
   )

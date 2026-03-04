@@ -4,7 +4,10 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
  * Streams SSE events from POST /run using fetch + ReadableStream.
  * Cannot use EventSource because the endpoint requires POST.
  */
-export async function streamRun({ facilityId, token, onEvent, onError, onDone }) {
+export async function streamRun({ facilityId, token, humanFeedback, onEvent, onError, onDone }) {
+  const bodyPayload = { facility_id: facilityId };
+  if (humanFeedback) bodyPayload.human_feedback = humanFeedback;
+
   let response;
   try {
     response = await fetch(`${API_BASE}/run`, {
@@ -13,7 +16,7 @@ export async function streamRun({ facilityId, token, onEvent, onError, onDone })
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ facility_id: facilityId }),
+      body: JSON.stringify(bodyPayload),
     });
   } catch (err) {
     onError?.(err.message || 'Network error');

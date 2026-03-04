@@ -6,35 +6,37 @@ export default function Auditor() {
   const [decisions, setDecisions] = useState([])
   const [proposals, setProposals] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [filterRunId, setFilterRunId] = useState('')
   const [filterFacilityId, setFilterFacilityId] = useState('')
   const [expandedIds, setExpandedIds] = useState(new Set())
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [decSnap, propSnap] = await Promise.all([
-          getDocs(collection(db, 'agent_decisions')),
-          getDocs(collection(db, 'proposals')),
-        ])
+  const fetchData = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    try {
+      const [decSnap, propSnap] = await Promise.all([
+        getDocs(collection(db, 'agent_decisions')),
+        getDocs(collection(db, 'proposals')),
+      ])
 
-        const decList = decSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
-        decList.sort((a, b) => {
-          const ta = a.timestamp?.toDate?.() || new Date(0)
-          const tb = b.timestamp?.toDate?.() || new Date(0)
-          return tb - ta
-        })
-        setDecisions(decList)
-
-        setProposals(propSnap.docs.map((d) => ({ id: d.id, ...d.data() })))
-      } catch (err) {
-        console.error('Auditor data load error:', err)
-      } finally {
-        setLoading(false)
-      }
+      const decList = decSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      decList.sort((a, b) => {
+        const ta = a.timestamp?.toDate?.() || new Date(0)
+        const tb = b.timestamp?.toDate?.() || new Date(0)
+        return tb - ta
+      })
+      setDecisions(decList)
+      setProposals(propSnap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    } catch (err) {
+      console.error('Auditor data load error:', err)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
     }
-    load()
-  }, [])
+  }
+
+  useEffect(() => { fetchData() }, [])
 
   const filtered = decisions.filter((d) => {
     if (
@@ -74,7 +76,12 @@ export default function Auditor() {
 
   return (
     <div className="page">
-      <h1>Auditor Dashboard</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Auditor Dashboard</h1>
+        <button className="btn btn-sm" onClick={() => fetchData(true)} disabled={refreshing}>
+          {refreshing ? 'Refreshing...' : 'Refresh Data'}
+        </button>
+      </div>
 
       {/* KPI Cards */}
       <div className="kpi-grid">
@@ -136,8 +143,9 @@ export default function Auditor() {
                 <span>
                   <strong>Facility:</strong> {d.facility_id || 'N/A'}
                 </span>
-                <span>
-                  <strong>Run ID:</strong> {d.run_id || 'N/A'}
+                <span title={d.run_id || ''}>
+                  <strong>Run ID:</strong>{' '}
+                  <span className="truncate">{d.run_id || 'N/A'}</span>
                 </span>
                 <span>
                   <strong>Confidence:</strong> {d.confidence || 'N/A'}

@@ -54,6 +54,7 @@ class ProposalDecisionRequest(BaseModel):
     
 class RunRequest(BaseModel):
     facility_id: str
+    human_feedback: str | None = None
 
 @app.get("/ping")
 async def ping():
@@ -173,7 +174,7 @@ async def run_graph_stream(
                 "facility_profile": None,
                 "energy_load_output": None,
                 "battery_sizing_output": None,
-                "human_feedback": None,
+                "human_feedback": body.human_feedback,
                 "final_proposal": None,
                 "status": "starting",
                 "disqualified": False,
