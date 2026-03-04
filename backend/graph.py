@@ -272,7 +272,7 @@ def orchestrator(state: AgentState) -> AgentState:
     under the Destination Zero strategy.
 
     Facility Profile:
-    {json.dumps(profile, indent=2)}
+    {json.dumps(profile, indent=2, default=str)}
 
     Determine priority tier, routing flags, confidence, and rationale.
     """
@@ -341,7 +341,7 @@ def energy_load_agent(state: AgentState) -> AgentState:
     Recommend an Accelera BESS configuration to reduce diesel runtime and handle peak demand events.
 
     Facility profile:
-    {json.dumps(profile, indent = 2)}
+    {json.dumps(profile, indent=2, default=str)}
 
     NMC recommended flag (extreme cold climate override): {nmc_flag}
 
@@ -408,10 +408,10 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
     Model the financial case for adding an Accelera BESS at this Cummins facility.
 
     Facility profile:
-    {json.dumps(profile, indent = 2)}
+    {json.dumps(profile, indent=2, default=str)}
 
     Energy Load Agent output:
-    {json.dumps(energy_load_output, indent = 2)}
+    {json.dumps(energy_load_output, indent = 2, default=str)}
 
     IRA credit flag (apply 30% ITC if true): {ira_flag}
 
