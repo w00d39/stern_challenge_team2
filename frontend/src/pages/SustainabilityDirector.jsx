@@ -6,7 +6,6 @@ import { submitDecision } from '../lib/api'
 export default function SustainabilityDirector({ user }) {
   const [allProposals, setAllProposals] = useState([])
   const [selectedFacility, setSelectedFacility] = useState(null)
-  const [selectedRunId, setSelectedRunId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -37,31 +36,25 @@ export default function SustainabilityDirector({ user }) {
     return unsub
   }, [])
 
-  // Group by facility_id, pick latest per facility, sort groups by best urgency
-  const grouped = {}
+  // One card per facility — only the latest pending proposal matters
+  const latestByFacility = {}
   for (const p of allProposals) {
     const fid = p.facility_id || 'unknown'
-    if (!grouped[fid]) grouped[fid] = []
-    grouped[fid].push(p)
+    const existing = latestByFacility[fid]
+    if (!existing) {
+      latestByFacility[fid] = { latest: p, totalPending: 1 }
+    } else {
+      latestByFacility[fid].totalPending += 1
+      const pTime = p.created_at?.toDate?.() || new Date(0)
+      const eTime = existing.latest.created_at?.toDate?.() || new Date(0)
+      if (pTime > eTime) latestByFacility[fid].latest = p
+    }
   }
 
-  const facilityGroups = Object.entries(grouped)
-    .map(([facilityId, proposals]) => {
-      proposals.sort((a, b) => {
-        const ta = a.created_at?.toDate?.() || new Date(0)
-        const tb = b.created_at?.toDate?.() || new Date(0)
-        return tb - ta
-      })
-      const latest = proposals[0]
-      const bestUrgency = Math.max(...proposals.map((p) => p.urgency_score || 0))
-      return { facilityId, proposals, latest, count: proposals.length, bestUrgency }
-    })
-    .sort((a, b) => b.bestUrgency - a.bestUrgency)
+  const queue = Object.values(latestByFacility)
+    .sort((a, b) => (b.latest.urgency_score || 0) - (a.latest.urgency_score || 0))
 
-  const activeGroup = facilityGroups.find((g) => g.facilityId === selectedFacility)
-  const selected = activeGroup
-    ? (selectedRunId && activeGroup.proposals.find((p) => p.id === selectedRunId)) || activeGroup.latest
-    : null
+  const selected = queue.find((q) => q.latest.facility_id === selectedFacility)?.latest || null
 
   const handleDecision = async (status) => {
     if (!selected) return
@@ -90,12 +83,7 @@ export default function SustainabilityDirector({ user }) {
         text: `Proposal ${status.replace(/_/g, ' ')} successfully.`,
       })
       setFeedback('')
-      setSelectedRunId(null)
-
-      // If this was the last proposal for this facility, deselect the facility
-      if (activeGroup && activeGroup.count <= 1) {
-        setSelectedFacility(null)
-      }
+      setSelectedFacility(null)
     } catch (err) {
       setMessage({ type: 'error', text: err.message })
     } finally {
@@ -116,48 +104,54 @@ export default function SustainabilityDirector({ user }) {
       <div className="split-layout">
         {/* Queue Panel */}
         <div className="panel queue-panel">
-          <h2>Pending Review ({allProposals.length})</h2>
-          {facilityGroups.length === 0 ? (
+          <h2>Pending Review ({queue.length} facilities)</h2>
+          {queue.length === 0 ? (
             <div className="empty-state">No proposals pending review.</div>
           ) : (
             <div className="proposal-list">
-              {facilityGroups.map((g) => (
-                <div
-                  key={g.facilityId}
-                  className={`proposal-card ${selectedFacility === g.facilityId ? 'selected' : ''}`}
-                  onClick={() => {
-                    setSelectedFacility(g.facilityId)
-                    setSelectedRunId(null)
-                    setMessage(null)
-                    setFeedback('')
-                  }}
-                >
-                  <div className="proposal-card-header">
-                    <strong>{g.facilityId}</strong>
-                    <span className="badge badge-urgency">
-                      Urgency: {Math.round(g.bestUrgency).toLocaleString()}
-                    </span>
+              {queue.map((item) => {
+                const p = item.latest
+                const fid = p.facility_id || 'unknown'
+                return (
+                  <div
+                    key={fid}
+                    className={`proposal-card ${selectedFacility === fid ? 'selected' : ''}`}
+                    onClick={() => {
+                      setSelectedFacility(fid)
+                      setMessage(null)
+                      setFeedback('')
+                    }}
+                  >
+                    <div className="proposal-card-header">
+                      <strong>{fid}</strong>
+                      {p.urgency_score != null && (
+                        <span className="badge badge-urgency">
+                          Urgency: {Math.round(p.urgency_score).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="proposal-card-meta">
+                      <span>Latest run</span>
+                      {p.created_at && <span>{fmtTs(p.created_at)}</span>}
+                    </div>
+                    {item.totalPending > 1 && (
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                        {item.totalPending - 1} older run{item.totalPending - 1 > 1 ? 's' : ''} superseded
+                      </div>
+                    )}
+                    {p.proposal_json?.priority_tier && (
+                      <span className={`badge badge-tier-${p.proposal_json.priority_tier.toLowerCase()}`}>
+                        {p.proposal_json.priority_tier}
+                      </span>
+                    )}
+                    {p.proposal_json?.ira_credit_flag && (
+                      <span className="badge badge-ira" style={{ marginLeft: 6 }}>
+                        IRA Eligible
+                      </span>
+                    )}
                   </div>
-                  <div className="proposal-card-meta">
-                    <span>
-                      {g.count === 1
-                        ? '1 pending run'
-                        : `${g.count} pending runs`}
-                    </span>
-                    {g.latest.created_at && <span>{fmtTs(g.latest.created_at)}</span>}
-                  </div>
-                  {g.latest.proposal_json?.priority_tier && (
-                    <span className={`badge badge-tier-${g.latest.proposal_json.priority_tier.toLowerCase()}`}>
-                      {g.latest.proposal_json.priority_tier}
-                    </span>
-                  )}
-                  {g.latest.proposal_json?.ira_credit_flag && (
-                    <span className="badge badge-ira" style={{ marginLeft: 6 }}>
-                      IRA Eligible
-                    </span>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -167,40 +161,13 @@ export default function SustainabilityDirector({ user }) {
           {!selected ? (
             <div className="empty-state">Select a facility to review.</div>
           ) : (
-            <>
-              {/* Run selector when multiple pending proposals for same facility */}
-              {activeGroup && activeGroup.count > 1 && (
-                <div className="run-selector">
-                  <label style={{ fontSize: 13, fontWeight: 500, color: '#555' }}>
-                    {activeGroup.count} pending runs for {activeGroup.facilityId} — reviewing:
-                  </label>
-                  <select
-                    className="select"
-                    style={{ marginTop: 4, fontSize: 13 }}
-                    value={selected.id}
-                    onChange={(e) => {
-                      setSelectedRunId(e.target.value)
-                      setFeedback('')
-                      setMessage(null)
-                    }}
-                  >
-                    {activeGroup.proposals.map((p, i) => (
-                      <option key={p.id} value={p.id}>
-                        Run {i + 1} — {fmtTs(p.created_at)}{i === 0 ? ' (latest)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <ProposalDetail
-                proposal={selected}
-                feedback={feedback}
-                setFeedback={setFeedback}
-                onDecision={handleDecision}
-                submitting={submitting}
-              />
-            </>
+            <ProposalDetail
+              proposal={selected}
+              feedback={feedback}
+              setFeedback={setFeedback}
+              onDecision={handleDecision}
+              submitting={submitting}
+            />
           )}
         </div>
       </div>
