@@ -1,10 +1,22 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs } from 'firebase/firestore'
+import { collection, getDocs, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { streamRun } from '../lib/api'
 
+const STATUS_STYLES = {
+  pending_review: { background: '#fff3e0', color: '#e65100', label: 'Pending Review' },
+  approved: { background: '#e8f5e9', color: '#2e7d32', label: 'Approved' },
+  rejected: { background: '#fce4ec', color: '#c62828', label: 'Rejected' },
+  revision_requested: { background: '#fff8e1', color: '#f57c00', label: 'Revision Requested' },
+  running: { background: '#e3f2fd', color: '#1565c0', label: 'Running' },
+  created: { background: '#f5f5f5', color: '#666', label: 'Created' },
+  disqualified: { background: '#fce4ec', color: '#c62828', label: 'Disqualified' },
+}
+
 export default function FacilityEngineer({ user }) {
   const [facilities, setFacilities] = useState([])
+  const [proposals, setProposals] = useState([])
+  const [revisions, setRevisions] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [loadingFacilities, setLoadingFacilities] = useState(true)
   const [running, setRunning] = useState(false)
@@ -12,17 +24,13 @@ export default function FacilityEngineer({ user }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
+  // Load facility profiles
   useEffect(() => {
     async function loadFacilities() {
       try {
         const snap = await getDocs(collection(db, 'facility_profiles'))
-        const list = snap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }))
-        list.sort((a, b) =>
-          (a.name || a.id).localeCompare(b.name || b.id)
-        )
+        const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+        list.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
         setFacilities(list)
       } catch (err) {
         console.error('Failed to load facilities:', err)
@@ -34,10 +42,66 @@ export default function FacilityEngineer({ user }) {
     loadFacilities()
   }, [])
 
+  // Load all proposals (for status indicators)
+  useEffect(() => {
+    async function loadProposals() {
+      try {
+        const snap = await getDocs(collection(db, 'proposals'))
+        setProposals(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      } catch (err) {
+        console.error('Failed to load proposals:', err)
+      }
+    }
+    loadProposals()
+  }, [result])
+
+  // Real-time listener for revision requests
+  useEffect(() => {
+    const q = query(
+      collection(db, 'proposals'),
+      where('status', '==', 'revision_requested'),
+    )
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+        list.sort((a, b) => {
+          const ta = a.updated_at?.toDate?.() || new Date(0)
+          const tb = b.updated_at?.toDate?.() || new Date(0)
+          return tb - ta
+        })
+        setRevisions(list)
+      },
+      (err) => console.error('Revisions snapshot error:', err),
+    )
+    return unsub
+  }, [])
+
   const selected = facilities.find((f) => f.id === selectedId)
 
-  const handleRunAnalysis = async () => {
-    if (!selectedId) return
+  // Build a map: facility_id -> latest proposal status
+  const facilityStatus = {}
+  for (const p of proposals) {
+    const fid = p.facility_id
+    if (!fid) continue
+    const existing = facilityStatus[fid]
+    if (!existing) {
+      facilityStatus[fid] = p
+    } else {
+      const pTime = p.updated_at?.toDate?.() || new Date(0)
+      const eTime = existing.updated_at?.toDate?.() || new Date(0)
+      if (pTime > eTime) facilityStatus[fid] = p
+    }
+  }
+
+  const handleRunAnalysis = async (facilityId) => {
+    const targetId = facilityId || selectedId
+    if (!targetId) return
+
+    if (facilityId && facilityId !== selectedId) {
+      setSelectedId(facilityId)
+    }
+
     setRunning(true)
     setEvents([])
     setResult(null)
@@ -46,7 +110,7 @@ export default function FacilityEngineer({ user }) {
     const token = await user.getIdToken()
 
     await streamRun({
-      facilityId: selectedId,
+      facilityId: targetId,
       token,
       onEvent: (evt) => {
         setEvents((prev) => [...prev, evt])
@@ -61,11 +125,51 @@ export default function FacilityEngineer({ user }) {
     })
   }
 
-  if (loadingFacilities) return <div className="loading">Loading facilities...</div>
+  if (loadingFacilities)
+    return <div className="loading">Loading facilities...</div>
 
   return (
     <div className="page">
       <h1>Facility Engineer Dashboard</h1>
+
+      {/* Revision Requests */}
+      {revisions.length > 0 && (
+        <div className="card revision-section">
+          <h2>Revision Requests ({revisions.length})</h2>
+          <p style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>
+            The Sustainability Director has requested revisions on these
+            proposals. Review the feedback and re-run analysis.
+          </p>
+          {revisions.map((r) => (
+            <div key={r.id} className="revision-card">
+              <div className="revision-header">
+                <strong>{r.facility_id}</strong>
+                <span className="badge" style={{ background: '#fff8e1', color: '#f57c00' }}>
+                  Revision #{r.revision_count || 1}
+                </span>
+              </div>
+              {r.feedback_text && (
+                <div className="revision-feedback">
+                  <strong>Director feedback:</strong> {r.feedback_text}
+                </div>
+              )}
+              <div style={{ fontSize: 13, color: '#888', marginBottom: 10 }}>
+                {r.updated_at?.toDate
+                  ? r.updated_at.toDate().toLocaleString()
+                  : ''}
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ padding: '8px 16px', fontSize: 13 }}
+                onClick={() => handleRunAnalysis(r.facility_id)}
+                disabled={running}
+              >
+                Re-run Analysis for {r.facility_id}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Facility Selector */}
       <div className="card">
@@ -92,7 +196,30 @@ export default function FacilityEngineer({ user }) {
       {/* Facility Details */}
       {selected && (
         <div className="card">
-          <h2>{selected.name || selected.id}</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ margin: 0 }}>{selected.name || selected.id}</h2>
+            {facilityStatus[selected.id] && (
+              <StatusBadge status={facilityStatus[selected.id].status} />
+            )}
+          </div>
+
+          {/* Show existing proposal info if any */}
+          {facilityStatus[selected.id] && (
+            <div className="facility-proposal-status">
+              <span>
+                Latest proposal: <strong>{facilityStatus[selected.id].status?.replace(/_/g, ' ')}</strong>
+              </span>
+              {facilityStatus[selected.id].run_id && (
+                <span> · Run ID: {facilityStatus[selected.id].run_id}</span>
+              )}
+              {facilityStatus[selected.id].feedback_text && (
+                <div style={{ marginTop: 6 }}>
+                  <strong>Feedback:</strong> {facilityStatus[selected.id].feedback_text}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="detail-grid">
             <Detail label="Facility ID" value={selected.facility_id || selected.id} />
             <Detail label="Type" value={selected.facility_type} />
@@ -148,7 +275,10 @@ export default function FacilityEngineer({ user }) {
               }
             />
             <Detail label="ESG Mandate" value={selected.esg_mandate} />
-            <Detail label="Grid Outages/Month" value={selected.monthly_grid_outage_count} />
+            <Detail
+              label="Grid Outages/Month"
+              value={selected.monthly_grid_outage_count}
+            />
             <Detail
               label="Existing Solar"
               value={
@@ -161,7 +291,7 @@ export default function FacilityEngineer({ user }) {
 
           <button
             className="btn btn-primary"
-            onClick={handleRunAnalysis}
+            onClick={() => handleRunAnalysis()}
             disabled={running}
             style={{ marginTop: 20 }}
           >
@@ -187,7 +317,9 @@ export default function FacilityEngineer({ user }) {
               <div key={i} className={`trace-event trace-${evt.stage}`}>
                 <span className="trace-stage">{evt.stage}</span>
                 {evt.facility_id && (
-                  <span className="trace-detail">Facility: {evt.facility_id}</span>
+                  <span className="trace-detail">
+                    Facility: {evt.facility_id}
+                  </span>
                 )}
                 {evt.status && (
                   <span className="trace-detail">Status: {evt.status}</span>
@@ -252,5 +384,17 @@ function Detail({ label, value }) {
       <span className="detail-label">{label}</span>
       <span className="detail-value">{value ?? 'N/A'}</span>
     </div>
+  )
+}
+
+function StatusBadge({ status }) {
+  const style = STATUS_STYLES[status] || { background: '#f5f5f5', color: '#666', label: status }
+  return (
+    <span
+      className="badge"
+      style={{ background: style.background, color: style.color }}
+    >
+      {style.label}
+    </span>
   )
 }
