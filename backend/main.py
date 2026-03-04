@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
-
+from typing import Optional
 load_dotenv(dotenv_path=".env")
 
 # Init Firebase (once)
@@ -32,6 +32,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class TestGraphRequest(BaseModel):
+    facility_id: str
+    run_id: Optional[str] = None
+    human_feedback: Optional[str] = None
 
 def verify_bearer_token(authorization: str | None):
     if not authorization:
@@ -91,22 +96,45 @@ from graph import app_graph
 
 
 @app.post("/test-graph")
-async def test_graph(facility_id: str = "demo_facility"):
+async def test_graph(body: TestGraphRequest):
+    import uuid
+
     result = app_graph.invoke(
-        {
-            "facility_id": facility_id,
-            "run_id": None,
+       {
+            "facility_id": body.facility_id,
+            "run_id": run_id,
             "facility_profile": None,
             "energy_load_output": None,
             "battery_sizing_output": None,
-            "human_feedback": None,
+            "human_feedback": body.human_feedback,
             "final_proposal": None,
             "status": "starting",
             "disqualified": False,
             "disqualifier_reason": None,
-        }
+            "ira_credit_flag": None,
+            "nmc_recommended_flag": None,
+            "priority_tier": None,
+            "revision_count": 0,
+        },
+        config = {"configurable": {"thread_id": run_id}} #wiring in the checkpointer
     )
-    return {"status": result["status"], "disqualified": result["disqualified"]}
+
+    return  {
+            "facility_id": body.facility_id,
+            "run_id": run_id,
+            "facility_profile": None,
+            "energy_load_output": None,
+            "battery_sizing_output": None,
+            "human_feedback": body.human_feedback,
+            "final_proposal": None,
+            "status": "starting",
+            "disqualified": False,
+            "disqualifier_reason": None,
+            "ira_credit_flag": None,
+            "nmc_recommended_flag": None,
+            "priority_tier": None,
+            "revision_count": 0,
+        },
 
 
 @app.post("/setup-roles")
