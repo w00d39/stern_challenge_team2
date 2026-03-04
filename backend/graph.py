@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Optional, Dict, Any
+from typing import TypedDict, Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, field_validator
 from openai import OpenAI
 import os, json, re
 
@@ -186,6 +187,46 @@ class AgentState(TypedDict):
     priority_tier: Optional[str]
 
 
+class OrchestratorOutput(BaseModel):
+    priority_tier: Literal["HIGH", "MEDIUM", "MONITOR"]
+    ira_credit_flag: bool
+    nmc_recommended_flag: bool
+    confidence: Literal["high", "medium", "low"]
+    rationale: str = Field(min_length = 10)
+
+class EnergyLoadOutput(BaseModel):
+    diesel_runtime_reduction_hrs: int = Field(ge = 0)
+    peak_events_addressable_pct: float = Field(ge = 0.0, le = 1.0)
+    recommended_product: Literal["BP104E", "BP97E"]
+    recommended_module_count: Literal[1,2,4,8]
+    recommended_kwh_total: int = Field(ge = 0)
+    climate_risk_flag: bool
+    confidence: Literal["high", "medium", "low"]
+    rationale: str = Field(min_length = 10)
+
+class BatterySizingOutput(BaseModel):
+    scenario_continue_as_is_annual_cost_usd: int = Field(ge=0)
+    scenario_upgrade_diesel_annual_cost_usd: int = Field(ge=0)
+    scenario_add_battery_annual_cost_usd: int = Field(ge=0)
+    gross_capex_usd: int = Field(ge=0)
+    ira_credit_amount_usd: int = Field(ge=0)
+    ira_adjusted_capex_usd: int = Field(ge=0)
+    payback_years: float = Field(ge=0.0)
+    npv_5yr_usd: int
+    annual_demand_charge_savings_usd: int = Field(ge=0)
+    annual_diesel_cost_eliminated_usd: int = Field(ge=0)
+    co2_avoided_metric_tons_per_year: float = Field(ge=0.0)
+    confidence: Literal["high", "medium", "low"]
+    rationale: str = Field(min_length=10)
+
+    @field_validator("ira_adjusted_capex_usd")
+    @classmethod
+    def ira_capex_cannot_exceed_gross(cls, v, info):
+        gross = info.data.get("gross_capex_usd", 0)
+        if v > gross:
+            raise ValueError(f"ira_adjusted_capex_usd ({v}) cannot exceed gross_capex_usd ({gross})")
+        return v
+
 def orchestrator(state: AgentState) -> AgentState:
     facility_id = state["facility_id"]
     print(f"Orchestrator running for {facility_id}")
@@ -321,15 +362,29 @@ def orchestrator(state: AgentState) -> AgentState:
         )
         raw = response.choices[0].message.content.strip()
         llm_output = extract_json(raw)
+        validated = OrchestratorOutput(**llm_output)
+        llm_output = validated.model_dump()
+
     except Exception as e:
         #default to monitor if LLM error occurs so it doesn't freeze
         print(f"Orchestrator LLM error: {e}")
-        llm_output = {
-            "priority_tier": "MONITOR",
-            "ira_credit_flag": False,
-            "nmc_recommended_flag": False,
-            "confidence": "low",
-            "rationale": "LLM error; default to monitor.",
+        proposal_update(run_id, {"status": "failed", "feedback_text": str(e)})
+        agent_decision_append(
+            run_id=run_id,
+            facility_id=facility_id,
+            agent_name="orchestrator",
+            input_summary="Validation or LLM failure",
+            output_json={"error": str(e)},
+            confidence="low",
+            rationale="Pipeline halted due to validation failure.",
+        )
+        return {
+            **state,
+            "run_id": run_id,
+            "facility_profile": profile,
+            "disqualified": True,
+            "disqualifier_reason": f"Orchestrator failed: {str(e)}",
+            "status": "failed",
         }
     
 
@@ -399,21 +454,22 @@ def energy_load_agent(state: AgentState) -> AgentState:
         )
         raw = response.choices[0].message.content.strip()
         llm_output = extract_json(raw)
+        validated = EnergyLoadOutput(**llm_output)
+        llm_output = validated.model_dump()
+
     except Exception as e:
         print(f"Energy Load Agent LLM error: {e}")
-        #fall back. we pull from facility fields directly
-        load_kw = profile.get("facility_power_load_kw", 500)
-        runtime = profile.get("annual_diesel_runtime_hours", 1000)
-        llm_output = {
-            "diesel_runtime_reduction_hrs": int(runtime * 0.6),
-            "peak_events_addressable_pct": 0.7,
-            "recommended_product": "BP97E" if nmc_flag else "BP104E",
-            "recommended_module_count": 4 if load_kw >= 400 else 2,
-            "recommended_kwh_total": 800 if load_kw >= 400 else 400,
-            "climate_risk_flag": nmc_flag or profile.get("monthly_grid_outage_count", 0) >= 3,
-            "confidence": "low",
-            "rationale": "LLM error. Fallback estimates used based on facility load and runtime fields.",
-        }
+        proposal_update(state["run_id"], {"status": "failed", "feedback_text": str(e)})
+        agent_decision_append(
+            run_id=state["run_id"],
+            facility_id=state["facility_id"],
+            agent_name="energy_load_agent",
+            input_summary="Validation or LLM failure",
+            output_json={"error": str(e)},
+            confidence="low",
+            rationale="Pipeline halted due to validation failure.",
+        )
+        raise RuntimeError(f"Energy Load Agent validation failed: {e}")
 
     agent_decision_append(
         run_id=state["run_id"],
@@ -476,39 +532,23 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
         )
         raw = response.choices[0].message.content.strip()
         llm_output = extract_json(raw)
-
+        validated = BatterySizingOutput(**llm_output)
+        llm_output = validated.model_dump()
+        
     except Exception as e:
         print(f"Battery Sizing Agent LLM error: {e}")
 
-        #fall back estimates using the facility fields
-        demand = profile.get("monthly_demand_charge_usd", 5000) * 12
-        diesel = profile.get("annual_diesel_fuel_cost", 30000)
-        grid = profile.get("grid_electricity_rate_kwh", 0.12)
-        load = profile.get("facility_power_load_kw", 500)
-        modules = energy_load_output.get("recommended_module_count", 4)
-        gross_capex = modules * 187500
-        ira_credit = int(gross_capex * 0.30) if ira_flag else 0
-        net_capex = gross_capex - ira_credit
-        annual_savings = int(demand * 0.25 + diesel * 0.6)
-        payback = round(net_capex / annual_savings, 1) if annual_savings > 0 else 99.0
-        llm_output = {
-        "scenario_continue_as_is_annual_cost_usd": int(demand + diesel),
-        "scenario_upgrade_diesel_annual_cost_usd": int(demand + diesel * 0.85 + 18000),
-        "scenario_add_battery_annual_cost_usd": int(demand * 0.75 + diesel * 0.4),
-        "gross_capex_usd": gross_capex,
-        "ira_credit_amount_usd": ira_credit,
-        "ira_adjusted_capex_usd": net_capex,
-        "payback_years": payback,
-        "npv_5yr_usd": int(annual_savings * 3.99 - net_capex),
-        "annual_demand_charge_savings_usd": int(demand * 0.25),
-        "annual_diesel_cost_eliminated_usd": int(diesel * 0.6),
-        "co2_avoided_metric_tons_per_year": round(
-            energy_load_output.get("diesel_runtime_reduction_hrs", 500)
-            * load * 0.6 * 0.000293, 1
-        ),
-        "confidence": "low",
-        "rationale": "LLM error. Fallback estimates used. Manual review required.",
-        }
+        proposal_update(state["run_id"], {"status": "failed", "feedback_text": str(e)})
+        agent_decision_append(
+            run_id=state["run_id"],
+            facility_id=state["facility_id"],
+            agent_name="battery_sizing_agent",
+            input_summary="Validation or LLM failure",
+            output_json={"error": str(e)},
+            confidence="low",
+            rationale="Pipeline halted due to validation failure.",
+        )
+        raise RuntimeError(f"Battery Sizing Agent validation failed: {e}")
 
     agent_decision_append(
         run_id=state["run_id"],
@@ -545,11 +585,8 @@ def review_node(state: AgentState) -> AgentState:
 
     final_proposal = build_final_proposal(state)
 
-    urgency_score = None
-    profile = state.get("facility_profile") or {}
-    demand_charge = profile.get("monthly_demand_charge_usd")
-    if demand_charge is not None:
-        urgency_score = float(demand_charge)
+    priority_tier = state.get("priority_tier", "MONITOR")
+    urgency_score = {"HIGH": 3.0, "MEDIUM": 2.0, "MONITOR": 1.0}.get(priority_tier, 1.0)
 
     proposal_save_draft(
         run_id=state["run_id"],
