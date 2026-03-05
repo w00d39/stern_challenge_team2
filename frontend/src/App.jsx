@@ -80,7 +80,7 @@ function App() {
     <div className="app-shell">
       <nav className="navbar">
         <div className="nav-brand">
-          <strong>Accelera</strong>
+          <strong>Destination Zero Dashboard</strong>
           <span className="nav-subtitle">Facility Decarbonization</span>
         </div>
         <div className="nav-right">

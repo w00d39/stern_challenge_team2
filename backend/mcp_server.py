@@ -1,3 +1,7 @@
+import os
+# Ensure .env loads from backend directory when run as subprocess
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP

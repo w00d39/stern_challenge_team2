@@ -1,5 +1,6 @@
+import asyncio
 import json
-from typing import Optional, Iterator
+from typing import Optional, Iterator, AsyncIterator
 
 import firebase_admin
 from firebase_admin import firestore
@@ -54,3 +55,36 @@ class FirestoreCheckpointer(BaseCheckpointSaver):
     def list(self, config, limit=None, before=None) -> Iterator[CheckpointTuple]:
         # Not needed for MVP
         return iter([])
+
+    async def aget_tuple(self, config) -> Optional[CheckpointTuple]:
+        return await asyncio.to_thread(self.get_tuple, config)
+
+    async def aput(
+        self,
+        config,
+        checkpoint,
+        metadata,
+        new_versions,
+    ):
+        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
+
+    async def aput_writes(
+        self,
+        config,
+        writes,
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+
+    async def alist(
+        self,
+        config=None,
+        *,
+        filter=None,
+        before=None,
+        limit=None,
+    ) -> AsyncIterator[CheckpointTuple]:
+        result = await asyncio.to_thread(self.list, config, limit=limit, before=before)
+        for item in result:
+            yield item

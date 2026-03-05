@@ -94,31 +94,57 @@ async def test_openrouter():
 
 
 from graph import app_graph
+from graph_tools import USE_MCP
 
 
 @app.post("/test-graph")
 async def test_graph(body: TestGraphRequest):
     run_id = body.run_id or uuid.uuid4().hex
-
-    result = app_graph.invoke(
-       {
-            "facility_id": body.facility_id,
-            "run_id": run_id,
-            "facility_profile": None,
-            "energy_load_output": None,
-            "battery_sizing_output": None,
-            "human_feedback": body.human_feedback,
-            "final_proposal": None,
-            "status": "starting",
-            "disqualified": False,
-            "disqualifier_reason": None,
-            "ira_credit_flag": None,
-            "nmc_recommended_flag": None,
-            "priority_tier": None,
-            "revision_count": 0,
-        },
-        config = {"configurable": {"thread_id": run_id}} #wiring in the checkpointer
-    )
+    init_state = {
+        "facility_id": body.facility_id,
+        "run_id": run_id,
+        "facility_profile": None,
+        "energy_load_output": None,
+        "battery_sizing_output": None,
+        "human_feedback": body.human_feedback,
+        "final_proposal": None,
+        "status": "starting",
+        "disqualified": False,
+        "disqualifier_reason": None,
+        "ira_credit_flag": None,
+        "nmc_recommended_flag": None,
+        "priority_tier": None,
+        "revision_count": 0,
+    }
+    if USE_MCP:
+        from mcp_tools import set_mcp_session, clear_mcp_session
+        from mcp.client.stdio import stdio_client, StdioServerParameters, get_default_environment
+        from mcp.client.session import ClientSession
+        import sys
+        _backend_dir = os.path.dirname(os.path.abspath(__file__))
+        _env = {**get_default_environment(), **{k: str(v) for k, v in os.environ.items() if v is not None}}
+        server_params = StdioServerParameters(
+            command=sys.executable,
+            args=[os.path.join(_backend_dir, "mcp_server.py")],
+            env=_env,
+            cwd=_backend_dir,
+        )
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                set_mcp_session(session)
+                try:
+                    result = await app_graph.ainvoke(
+                        init_state,
+                        config={"configurable": {"thread_id": run_id}},
+                    )
+                finally:
+                    clear_mcp_session()
+    else:
+        result = await app_graph.ainvoke(
+            init_state,
+            config={"configurable": {"thread_id": run_id}},
+        )
 
     return  {
             "facility_id": body.facility_id,
@@ -217,10 +243,37 @@ async def run_graph_stream(
             await asyncio.sleep(0)
 
             thread_id = uuid.uuid4().hex
-            result = app_graph.invoke(
-                init_state,
-                config={"configurable": {"thread_id": thread_id}},
-            )
+
+            if USE_MCP:
+                import sys
+                from mcp_tools import set_mcp_session, clear_mcp_session
+                _backend_dir = os.path.dirname(os.path.abspath(__file__))
+                from mcp.client.stdio import stdio_client, StdioServerParameters, get_default_environment
+                from mcp.client.session import ClientSession
+
+                _env = {**get_default_environment(), **{k: str(v) for k, v in os.environ.items() if v is not None}}
+                server_params = StdioServerParameters(
+                    command=sys.executable,
+                    args=[os.path.join(_backend_dir, "mcp_server.py")],
+                    env=_env,
+                    cwd=_backend_dir,
+                )
+                async with stdio_client(server_params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        set_mcp_session(session)
+                        try:
+                            result = await app_graph.ainvoke(
+                                init_state,
+                                config={"configurable": {"thread_id": thread_id}},
+                            )
+                        finally:
+                            clear_mcp_session()
+            else:
+                result = await app_graph.ainvoke(
+                    init_state,
+                    config={"configurable": {"thread_id": thread_id}},
+                )
 
             finished_payload = {
                 "stage": "finished",
@@ -231,9 +284,24 @@ async def run_graph_stream(
             yield f"data: {json.dumps(finished_payload)}\n\n"
 
         except Exception as e:
+            import traceback
+
+            def _flatten_exceptions(exc):
+                if hasattr(exc, "exceptions") and getattr(exc, "exceptions", None):
+                    out = []
+                    for sub in exc.exceptions:
+                        out.extend(_flatten_exceptions(sub))
+                    return out
+                return [exc]
+
+            err_msg = str(e)
+            flat = _flatten_exceptions(e)
+            if flat:
+                err_msg = "; ".join(f"{type(x).__name__}: {x}" for x in flat)
+            traceback.print_exc()
             error_payload = {
                 "stage": "error",
-                "error": str(e),
+                "error": err_msg,
             }
             yield f"data: {json.dumps(error_payload)}\n\n"
 

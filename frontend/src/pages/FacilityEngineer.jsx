@@ -431,7 +431,15 @@ export default function FacilityEngineer({ user }) {
                       </div>
                     )}
                     {p.urgency_score != null && (
-                      <div><strong>Urgency:</strong> {Math.round(p.urgency_score)}</div>
+                      <div><strong>Priority:</strong> {(() => {
+                        const tier = p.proposal_json?.priority_tier
+                        if (tier) return tier
+                        const u = p.urgency_score ?? 0
+                        if (u > 10) return 'HIGH'
+                        if (u >= 2.5) return 'HIGH'
+                        if (u >= 1.5) return 'MEDIUM'
+                        return 'MONITOR'
+                      })()}</div>
                     )}
                   </div>
                 </div>

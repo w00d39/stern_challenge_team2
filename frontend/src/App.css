@@ -432,7 +432,8 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.badge-urgency {
+.badge-urgency,
+.badge-priority {
   background: rgba(184, 135, 46, 0.12);
   color: var(--c-mustard);
 }
@@ -929,6 +930,14 @@
 .login-box {
   width: 100%;
   max-width: 400px;
+  margin-top: -25vh;
+}
+.login-logo {
+  display: block;
+  width: 100%;
+  max-width: 180px;
+  height: auto;
+  margin: 0 auto 24px;
 }
 .login-title {
   font-family: var(--font-display);
@@ -936,6 +945,7 @@
   font-weight: 600;
   color: var(--c-graphite);
   margin-bottom: 4px;
+  white-space: nowrap;
 }
 .login-subtitle {
   font-family: var(--font-heading);
@@ -945,4 +955,11 @@
   text-transform: uppercase;
   color: var(--c-concrete);
   margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+.login-subtitle-line {
+  display: block;
 }

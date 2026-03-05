@@ -89,6 +89,30 @@ def proposal_update(run_id: str, patch: Dict[str, Any]) -> None:
     db.collection("proposals").document(run_id).set(patch, merge=True)
 
 
+def proposal_supersede_older_pending(facility_id: str, keep_run_id: str) -> int:
+    """Mark older pending_review proposals for this facility as rejected. Director only sees latest."""
+    db = init_db()
+    q = (
+        db.collection("proposals")
+        .where(filter=FieldFilter("facility_id", "==", facility_id))
+        .where(filter=FieldFilter("status", "==", "pending_review"))
+    )
+    count = 0
+    for doc in q.stream():
+        if doc.id == keep_run_id:
+            continue
+        doc.reference.set(
+            {
+                "status": "rejected",
+                "feedback_text": "Superseded by newer run",
+                "updated_at": now_ts(),
+            },
+            merge=True,
+        )
+        count += 1
+    return count
+
+
 def proposal_save_draft(
     run_id: str,
     facility_id: str,
@@ -96,6 +120,8 @@ def proposal_save_draft(
     urgency_score: Optional[float] = None,
 ) -> None:
     db = init_db()
+    # Supersede older pending proposals for this facility — only latest matters
+    proposal_supersede_older_pending(facility_id, run_id)
     db.collection("proposals").document(run_id).set(
         {
             "run_id": run_id,
@@ -116,6 +142,18 @@ def proposal_update_decision(
     feedback_text: Optional[str] = None,
 ) -> None:
     db = init_db()
+    snap = db.collection("proposals").document(run_id).get()
+    if not snap.exists:
+        raise ValueError(f"Proposal {run_id} not found")
+    data = snap.to_dict() or {}
+
+    # When approving/rejecting, mark all other pending_review for this facility as rejected
+    # so Director only ever sees one proposal per facility
+    if status in ("approved", "rejected"):
+        facility_id = data.get("facility_id")
+        if facility_id:
+            proposal_supersede_older_pending(facility_id, run_id)
+
     patch: Dict[str, Any] = {
         "status": status,
         "reviewer_uid": reviewer_uid,
@@ -125,11 +163,7 @@ def proposal_update_decision(
     }
 
     if status == "revision_requested":
-        snap = db.collection("proposals").document(run_id).get()
-        revision_count = 0
-        if snap.exists:
-            data = snap.to_dict() or {}
-            revision_count = int(data.get("revision_count", 0))
+        revision_count = int(data.get("revision_count", 0))
         patch["revision_count"] = revision_count + 1
 
     db.collection("proposals").document(run_id).set(patch, merge=True)
