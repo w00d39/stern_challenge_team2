@@ -3,7 +3,7 @@ import { auth } from '../lib/firebase'
 export default function Unauthorized({ user }) {
   return (
     <div className="unauthorized-container">
-      <h1>Accelera</h1>
+      <h1>Destination Zero Dashboard</h1>
       <p style={{ color: 'var(--c-concrete)', marginBottom: 24 }}>
         Cummins Facility Decarbonization Platform
       </p>

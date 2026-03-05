@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '../lib/firebase'
+import logo from '../assets/IMG_0123.webp'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -25,9 +26,11 @@ export default function Login() {
   return (
     <div className="login-container">
       <div className="login-box">
-        <h1 className="login-title">Accelera</h1>
+        <img src={logo} alt="Cummins" className="login-logo" />
+        <h1 className="login-title">Destination Zero Dashboard</h1>
         <p className="login-subtitle">
-          Cummins Facility Decarbonization · Destination Zero
+          <span className="login-subtitle-line">Cummins Facility Decarbonization</span>
+          <span className="login-subtitle-line">Accelera Battery System Evaluation</span>
         </p>
 
         <div className="card">

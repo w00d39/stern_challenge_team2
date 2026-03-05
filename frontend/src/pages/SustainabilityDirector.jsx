@@ -139,8 +139,8 @@ export default function SustainabilityDirector({ user }) {
                     <div className="proposal-card-header">
                       <strong>{fid}</strong>
                       {(p.urgency_score != null || p.proposal_json?.priority_tier) && (
-                        <span className="badge badge-urgency">
-                          Urgency: {urgencyLabel(p)}
+                        <span className="badge badge-priority">
+                          Priority: {urgencyLabel(p)}
                         </span>
                       )}
                     </div>
@@ -152,11 +152,6 @@ export default function SustainabilityDirector({ user }) {
                       <div style={{ fontSize: 12, color: 'var(--c-concrete)', marginTop: 4 }}>
                         {item.totalPending - 1} older run{item.totalPending - 1 > 1 ? 's' : ''} superseded
                       </div>
-                    )}
-                    {p.proposal_json?.ira_credit_flag && (
-                      <span className="badge badge-ira" style={{ marginTop: 6, display: 'inline-block' }}>
-                        IRA Eligible
-                      </span>
                     )}
                   </div>
                 )
@@ -222,7 +217,7 @@ function ProposalDetail({ proposal, feedback, setFeedback, onDecision, submittin
         {energy.rationale && <p className="rationale">{energy.rationale}</p>}
       </Section>
 
-      <Section title="Battery Sizing & Financial Analysis">
+      <Section title="Financial Analysis">
         <h4>3-Scenario Cost Comparison</h4>
         <div className="scenario-grid">
           <ScenarioCard title="Continue As-Is" cost={battery.scenario_continue_as_is_annual_cost_usd} />

@@ -6,12 +6,12 @@ import os, json, re
 from checkpointer import FirestoreCheckpointer
 
 
-from firestore_tools import (
-    facility_profile_get,
-    proposal_create,
-    proposal_update,
-    proposal_save_draft,
-    agent_decision_append,
+from graph_tools import (
+    get_facility_profile,
+    create_proposal,
+    update_proposal,
+    save_draft_proposal,
+    save_agent_decision,
 )
 
 LLM_MODEL = "liquid/lfm-2.5-1.2b-thinking:free"
@@ -213,6 +213,17 @@ class EnergyLoadOutput(BaseModel):
             return round(v)
         return v
 
+    @field_validator("peak_events_addressable_pct", mode="before")
+    @classmethod
+    def coerce_pct_to_fraction(cls, v):
+        """LLM sometimes returns 5.0 for 5% instead of 0.05. Convert if > 1."""
+        if v is None:
+            return v
+        f = float(v)
+        if f > 1.0:
+            return min(1.0, f / 100.0)
+        return f
+
 class BatterySizingOutput(BaseModel):
     scenario_continue_as_is_annual_cost_usd: int = Field(ge=0)
     scenario_upgrade_diesel_annual_cost_usd: int = Field(ge=0)
@@ -254,19 +265,19 @@ class BatterySizingOutput(BaseModel):
             raise ValueError(f"ira_adjusted_capex_usd ({v}) cannot exceed gross_capex_usd ({gross})")
         return v
 
-def orchestrator(state: AgentState) -> AgentState:
+async def orchestrator(state: AgentState) -> AgentState:
     facility_id = state["facility_id"]
     print(f"Orchestrator running for {facility_id}")
 
-    profile = facility_profile_get(facility_id) or {}
+    profile = await get_facility_profile(facility_id) or {}
 
     run_id = state.get("run_id")
     if not run_id:
-        run_id = proposal_create(facility_id)
+        run_id = await create_proposal(facility_id)
 
-    proposal_update(run_id, {"status": "running"})
+    await update_proposal(run_id, {"status": "running"})
 
-    agent_decision_append(
+    await save_agent_decision(
         run_id=run_id,
         facility_id=facility_id,
         agent_name="orchestrator",
@@ -278,14 +289,14 @@ def orchestrator(state: AgentState) -> AgentState:
 
     if profile.get("annual_diesel_runtime_hours", 0) < 200:
         reason = "Emergency-Only — Low Priority"
-        proposal_update(
+        await update_proposal(
             run_id,
             {
                 "status": "rejected",
                 "feedback_text": reason,
             },
         )
-        agent_decision_append(
+        await save_agent_decision(
             run_id=run_id,
             facility_id=facility_id,
             agent_name="orchestrator",
@@ -305,14 +316,14 @@ def orchestrator(state: AgentState) -> AgentState:
 
     if profile.get("monthly_demand_charge_usd", 0) < 2000:
         reason = "Low Demand Charge — Monitor"
-        proposal_update(
+        await update_proposal(
             run_id,
             {
                 "status": "rejected",
                 "feedback_text": reason,
             },
         )
-        agent_decision_append(
+        await save_agent_decision(
             run_id=run_id,
             facility_id=facility_id,
             agent_name="orchestrator",
@@ -332,14 +343,14 @@ def orchestrator(state: AgentState) -> AgentState:
 
     if profile.get("facility_power_load_kw", 0) < 100:
         reason = "Below Minimum Scale"
-        proposal_update(
+        await update_proposal(
             run_id,
             {
                 "status": "rejected",
                 "feedback_text": reason,
             },
         )
-        agent_decision_append(
+        await save_agent_decision(
             run_id=run_id,
             facility_id=facility_id,
             agent_name="orchestrator",
@@ -395,8 +406,8 @@ def orchestrator(state: AgentState) -> AgentState:
     except Exception as e:
         #default to monitor if LLM error occurs so it doesn't freeze
         print(f"Orchestrator LLM error: {e}")
-        proposal_update(run_id, {"status": "failed", "feedback_text": str(e)})
-        agent_decision_append(
+        await update_proposal(run_id, {"status": "failed", "feedback_text": str(e)})
+        await save_agent_decision(
             run_id=run_id,
             facility_id=facility_id,
             agent_name="orchestrator",
@@ -417,14 +428,14 @@ def orchestrator(state: AgentState) -> AgentState:
     ira_flag = bool(profile.get("ira_eligible", False))
     nmc_flag = profile.get("climate_zone", "") == "extreme_cold"
 
-    proposal_update(run_id, {
+    await update_proposal(run_id, {
         "status": "routing",
         "urgency_score": {"HIGH": 3, "MEDIUM": 2, "MONITOR": 1}.get(
             llm_output.get("priority_tier", "MONITOR"), 1
                 ),        
         })
 
-    agent_decision_append(
+    await save_agent_decision(
         run_id=run_id,
         facility_id=facility_id,
         agent_name="orchestrator",
@@ -448,7 +459,7 @@ def orchestrator(state: AgentState) -> AgentState:
 
 
 
-def energy_load_agent(state: AgentState) -> AgentState:
+async def energy_load_agent(state: AgentState) -> AgentState:
     print("Energy Load Agent running...")
 
     profile = state.get("facility_profile") or {}
@@ -494,8 +505,8 @@ def energy_load_agent(state: AgentState) -> AgentState:
 
     except Exception as e:
         print(f"Energy Load Agent LLM error: {e}")
-        proposal_update(state["run_id"], {"status": "failed", "feedback_text": str(e)})
-        agent_decision_append(
+        await update_proposal(state["run_id"], {"status": "failed", "feedback_text": str(e)})
+        await save_agent_decision(
             run_id=state["run_id"],
             facility_id=state["facility_id"],
             agent_name="energy_load_agent",
@@ -506,7 +517,7 @@ def energy_load_agent(state: AgentState) -> AgentState:
         )
         raise RuntimeError(f"Energy Load Agent validation failed: {e}")
 
-    agent_decision_append(
+    await save_agent_decision(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         agent_name="energy_load_agent",
@@ -523,7 +534,7 @@ def energy_load_agent(state: AgentState) -> AgentState:
     }
 
 
-def battery_sizing_agent(state: AgentState) -> AgentState:
+async def battery_sizing_agent(state: AgentState) -> AgentState:
     print("Battery Sizing Agent running...")
 
     profile = state.get("facility_profile") or {}
@@ -573,8 +584,8 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
     except Exception as e:
         print(f"Battery Sizing Agent LLM error: {e}")
 
-        proposal_update(state["run_id"], {"status": "failed", "feedback_text": str(e)})
-        agent_decision_append(
+        await update_proposal(state["run_id"], {"status": "failed", "feedback_text": str(e)})
+        await save_agent_decision(
             run_id=state["run_id"],
             facility_id=state["facility_id"],
             agent_name="battery_sizing_agent",
@@ -585,7 +596,7 @@ def battery_sizing_agent(state: AgentState) -> AgentState:
         )
         raise RuntimeError(f"Battery Sizing Agent validation failed: {e}")
 
-    agent_decision_append(
+    await save_agent_decision(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         agent_name="battery_sizing_agent",
@@ -615,7 +626,7 @@ def build_final_proposal(state: AgentState) -> Dict[str, Any]:
     }
 
 
-def review_node(state: AgentState) -> AgentState:
+async def review_node(state: AgentState) -> AgentState:
     print("Review node saving draft proposal...")
 
     final_proposal = build_final_proposal(state)
@@ -623,14 +634,14 @@ def review_node(state: AgentState) -> AgentState:
     priority_tier = state.get("priority_tier", "MONITOR")
     urgency_score = {"HIGH": 3.0, "MEDIUM": 2.0, "MONITOR": 1.0}.get(priority_tier, 1.0)
 
-    proposal_save_draft(
+    await save_draft_proposal(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         proposal_json=final_proposal,
         urgency_score=urgency_score,
     )
 
-    agent_decision_append(
+    await save_agent_decision(
         run_id=state["run_id"],
         facility_id=state["facility_id"],
         agent_name="review_node",
