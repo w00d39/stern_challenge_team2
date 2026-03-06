@@ -469,6 +469,104 @@
   font-family: var(--font-mono);
   font-size: 13px;
 }
+/* ── Status Nodes (analysis progress) ── */
+.status-nodes {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  padding: 16px 0;
+  margin-bottom: 4px;
+}
+.status-node-row {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.status-node-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.status-node {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-linen);
+  border: 2px solid var(--c-sand);
+  transition: all 0.25s ease;
+}
+.status-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-concrete);
+}
+.status-node-done {
+  background: var(--c-teal);
+  border-color: var(--c-teal);
+}
+.status-node-done .status-node-check {
+  color: var(--c-cream);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+.status-node-running {
+  background: var(--c-mustard);
+  border-color: var(--c-amber);
+  animation: status-node-pulse 1.2s ease-in-out infinite;
+}
+.status-node-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: var(--c-cream);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.status-node-skipped {
+  opacity: 0.45;
+  background: var(--c-linen);
+}
+.status-node-skipped .status-node-dot {
+  background: var(--c-concrete);
+}
+.status-node-label {
+  font-family: var(--font-heading);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--c-steel);
+  text-align: center;
+  max-width: 90px;
+  line-height: 1.2;
+}
+.status-node-cell:has(.status-node-done) .status-node-label,
+.status-node-cell:has(.status-node-running) .status-node-label {
+  color: var(--c-graphite);
+}
+.status-node-connector {
+  width: 24px;
+  min-width: 24px;
+  height: 2px;
+  background: var(--c-sand);
+  margin: 0 4px;
+  align-self: flex-start;
+  margin-top: 17px;
+  transition: background 0.25s;
+}
+.status-node-connector-done {
+  background: var(--c-teal);
+}
+@keyframes status-node-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.05); }
+}
+
 .trace-event {
   padding: 8px 12px;
   margin-bottom: 6px;
@@ -481,7 +579,11 @@
 .trace-started {
   background: rgba(31, 92, 92, 0.08);
 }
-.trace-running_orchestrator {
+.trace-running_orchestrator,
+.trace-orchestrator-done,
+.trace-energy-load-done,
+.trace-battery-sizing-done,
+.trace-review-done {
   background: rgba(184, 135, 46, 0.1);
 }
 .trace-finished {
@@ -921,35 +1023,62 @@
 /* ── Login ── */
 .login-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  padding: 24px;
+  padding: clamp(16px, 4vw, 32px);
   background: var(--c-cream);
+  box-sizing: border-box;
+  position: relative;
+}
+.login-container::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--c-red) 0%,
+    var(--c-red) 25%,
+    var(--c-mustard) 25%,
+    var(--c-mustard) 50%,
+    var(--c-teal) 50%,
+    var(--c-teal) 75%,
+    var(--c-olive) 75%
+  );
 }
 .login-box {
   width: 100%;
-  max-width: 400px;
-  margin-top: -25vh;
+  max-width: min(420px, calc(100vw - 32px));
+  margin: 0 auto;
+}
+@media (min-width: 520px) {
+  .login-box {
+    max-width: min(480px, calc(100vw - 48px));
+  }
 }
 .login-logo {
   display: block;
   width: 100%;
-  max-width: 180px;
+  max-width: min(180px, 40vw);
   height: auto;
   margin: 0 auto 24px;
 }
 .login-title {
   font-family: var(--font-display);
-  font-size: 32px;
+  font-size: clamp(24px, 5vw, 32px);
   font-weight: 600;
   color: var(--c-graphite);
   margin-bottom: 4px;
-  white-space: nowrap;
+  text-align: center;
+  line-height: 1.2;
 }
 .login-subtitle {
   font-family: var(--font-heading);
-  font-size: 12px;
+  font-size: clamp(11px, 2vw, 12px);
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -959,6 +1088,7 @@
   flex-direction: column;
   gap: 4px;
   align-items: center;
+  text-align: center;
 }
 .login-subtitle-line {
   display: block;

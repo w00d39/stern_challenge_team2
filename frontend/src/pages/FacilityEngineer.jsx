@@ -245,7 +245,10 @@ export default function FacilityEngineer({ user }) {
                   rows={3}
                 />
               </div>
-              <button className="btn btn-primary" onClick={handleRunFromTab} disabled={running}>
+              {(running && runContext === 'tab') || (runContext === 'tab' && events.length > 0) ? (
+                <StatusNodes events={events} running={running} error={error} />
+              ) : null}
+              <button className="btn btn-primary" onClick={handleRunFromTab} disabled={running} style={{ marginTop: 16 }}>
                 {running && runContext === 'tab' ? 'Running Analysis...' : 'Run Analysis'}
               </button>
             </div>
@@ -378,6 +381,9 @@ export default function FacilityEngineer({ user }) {
                           </div>
                         )}
 
+                        {(isThisRunning || (runContext === r.id && events.length > 0)) && (
+                          <StatusNodes events={events} running={isThisRunning} error={showError ? error : null} />
+                        )}
                         {showTrace && (
                           <div style={{ marginTop: 12 }}>
                             <strong style={{ fontSize: 14 }}>Analysis Trace</strong>
@@ -452,12 +458,78 @@ export default function FacilityEngineer({ user }) {
   )
 }
 
+const STATUS_NODES = [
+  { id: 'orchestrator', label: 'Orchestrator' },
+  { id: 'energy_load', label: 'ELA Agent' },
+  { id: 'battery_sizing', label: 'Battery Sizing & ROI' },
+  { id: 'complete', label: 'Proposal Complete' },
+]
+
+function StatusNodes({ events, running, error }) {
+  const has = (s) => events.some((e) => e.stage === s)
+  const finishedEvt = events.find((e) => e.stage === 'finished')
+  const finishedSuccess = has('finished') && !error && !finishedEvt?.disqualified
+  const done = {
+    orchestrator: has('orchestrator_done') || finishedSuccess,
+    energy_load: has('energy_load_done') || finishedSuccess,
+    battery_sizing: has('battery_sizing_done') || finishedSuccess,
+    complete: has('review_done') || has('finished'),
+  }
+  const runningNode = running && !error
+    ? (done.complete ? null : done.battery_sizing ? 'complete' : done.energy_load ? 'battery_sizing' : done.orchestrator ? 'energy_load' : 'orchestrator')
+    : null
+
+  return (
+    <div className="status-nodes" role="status" aria-live="polite">
+      {STATUS_NODES.map((node, i) => {
+        const isRunning = runningNode === node.id
+        const isDone = done[node.id]
+        const isSkipped = error || (done.orchestrator && !done.energy_load && !['orchestrator', 'complete'].includes(node.id))
+        return (
+          <div key={node.id} className="status-node-row">
+            <div className="status-node-cell">
+              <div
+                className={`status-node ${isRunning ? 'status-node-running' : ''} ${isDone ? 'status-node-done' : ''} ${isSkipped ? 'status-node-skipped' : ''}`}
+                title={isRunning ? `Running: ${node.label}` : isDone ? `Done: ${node.label}` : node.label}
+              >
+                {isDone ? (
+                  <span className="status-node-check" aria-hidden>✓</span>
+                ) : isRunning ? (
+                  <span className="status-node-spinner" aria-hidden />
+                ) : (
+                  <span className="status-node-dot" aria-hidden />
+                )}
+              </div>
+              <span className="status-node-label">{node.label}</span>
+            </div>
+            {i < STATUS_NODES.length - 1 && (
+              <div className={`status-node-connector ${done[node.id] ? 'status-node-connector-done' : ''}`} aria-hidden />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function TracePanel({ events }) {
+  const stageLabel = (s) => {
+    const map = {
+      started: 'Started',
+      orchestrator_done: 'Orchestrator done',
+      energy_load_done: 'ELA Agent done',
+      battery_sizing_done: 'Battery Sizing done',
+      review_done: 'Review done',
+      finished: 'Finished',
+      error: 'Error',
+    }
+    return map[s] || s
+  }
   return (
     <div className="trace-panel">
       {events.map((evt, i) => (
-        <div key={i} className={`trace-event trace-${evt.stage}`}>
-          <span className="trace-stage">{evt.stage}</span>
+        <div key={i} className={`trace-event trace-${(evt.stage || '').replace(/_/g, '-')}`}>
+          <span className="trace-stage">{stageLabel(evt.stage) || evt.stage}</span>
           {evt.facility_id && <span className="trace-detail">Facility: {evt.facility_id}</span>}
           {evt.status && <span className="trace-detail">Status: {evt.status}</span>}
           {evt.disqualified != null && (

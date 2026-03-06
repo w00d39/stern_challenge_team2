@@ -93,7 +93,7 @@ async def test_openrouter():
     return {"response": response.choices[0].message.content}
 
 
-from graph import app_graph
+from graph import app_graph, _progress_queue
 from graph_tools import USE_MCP
 
 
@@ -216,6 +216,8 @@ async def run_graph_stream(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     async def event_generator():
+        progress_queue = asyncio.Queue()
+        token = _progress_queue.set(progress_queue)
         try:
             started_payload = {
                 "stage": "started",
@@ -236,45 +238,54 @@ async def run_graph_stream(
                 "disqualifier_reason": None,
             }
 
-            running_payload = {
-                "stage": "running_orchestrator",
-            }
-            yield f"data: {json.dumps(running_payload)}\n\n"
-            await asyncio.sleep(0)
-
             thread_id = uuid.uuid4().hex
+            config = {"configurable": {"thread_id": thread_id}}
+            result = {}
 
-            if USE_MCP:
-                import sys
-                from mcp_tools import set_mcp_session, clear_mcp_session
-                _backend_dir = os.path.dirname(os.path.abspath(__file__))
-                from mcp.client.stdio import stdio_client, StdioServerParameters, get_default_environment
-                from mcp.client.session import ClientSession
+            async def _run_graph():
+                nonlocal result
+                if USE_MCP:
+                    import sys
+                    from mcp_tools import set_mcp_session, clear_mcp_session
+                    _backend_dir = os.path.dirname(os.path.abspath(__file__))
+                    from mcp.client.stdio import stdio_client, StdioServerParameters, get_default_environment
+                    from mcp.client.session import ClientSession
 
-                _env = {**get_default_environment(), **{k: str(v) for k, v in os.environ.items() if v is not None}}
-                server_params = StdioServerParameters(
-                    command=sys.executable,
-                    args=[os.path.join(_backend_dir, "mcp_server.py")],
-                    env=_env,
-                    cwd=_backend_dir,
-                )
-                async with stdio_client(server_params) as (read, write):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        set_mcp_session(session)
-                        try:
-                            result = await app_graph.ainvoke(
-                                init_state,
-                                config={"configurable": {"thread_id": thread_id}},
-                            )
-                        finally:
-                            clear_mcp_session()
-            else:
-                result = await app_graph.ainvoke(
-                    init_state,
-                    config={"configurable": {"thread_id": thread_id}},
-                )
+                    _env = {**get_default_environment(), **{k: str(v) for k, v in os.environ.items() if v is not None}}
+                    server_params = StdioServerParameters(
+                        command=sys.executable,
+                        args=[os.path.join(_backend_dir, "mcp_server.py")],
+                        env=_env,
+                        cwd=_backend_dir,
+                    )
+                    async with stdio_client(server_params) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            set_mcp_session(session)
+                            try:
+                                result.update(await app_graph.ainvoke(init_state, config=config))
+                            finally:
+                                clear_mcp_session()
+                else:
+                    result.update(await app_graph.ainvoke(init_state, config=config))
 
+            graph_task = asyncio.create_task(_run_graph())
+
+            while not graph_task.done():
+                try:
+                    evt = await asyncio.wait_for(progress_queue.get(), timeout=0.3)
+                    yield f"data: {json.dumps(evt)}\n\n"
+                except asyncio.TimeoutError:
+                    pass
+
+            # Drain any remaining progress events
+            while not progress_queue.empty():
+                try:
+                    evt = progress_queue.get_nowait()
+                    yield f"data: {json.dumps(evt)}\n\n"
+                except asyncio.QueueEmpty:
+                    break
+
+            await graph_task
             finished_payload = {
                 "stage": "finished",
                 "status": result.get("status"),
@@ -282,6 +293,8 @@ async def run_graph_stream(
                 "run_id": result.get("run_id"),
             }
             yield f"data: {json.dumps(finished_payload)}\n\n"
+        finally:
+            _progress_queue.reset(token)
 
         except Exception as e:
             import traceback
@@ -305,4 +318,12 @@ async def run_graph_stream(
             }
             yield f"data: {json.dumps(error_payload)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
